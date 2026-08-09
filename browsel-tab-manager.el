@@ -155,10 +155,15 @@ returned by `browsel-browser-tabs') — and expected to register a
 bookmark under NAME pointing at (plist-get TAB :url).  Return
 value is ignored.
 
-The default, `browsel-tab-manager-bookmark-default', stores a
-vanilla `bookmark-store' record with `browse-url-bookmark-jump'
-as the handler.  Users of `bookmark+' or another bookmark backend
-can plug in their own function here without editing browsel."
+The default, `browsel-tab-manager-bookmark-default', calls
+`bookmark-store' with `browsel-tab-manager-bookmark-jump' as the
+handler.  The built-in `bookmark.el' defines no URL-aware
+handler, so browsel-tab-manager defines its own and uses it by
+default.  Users of `bookmark+' can set this variable to a
+function that stores `bmkp-jump-url-browse' as the handler; the
+`*Bookmark List*' type column then reads `URL' instead of
+`browsel-Tab-manager'.  Other backends replace this variable
+with a function of their own."
   :type 'function
   :group 'browsel)
 
@@ -1649,11 +1654,11 @@ computed within each browser separately."
 
 (defun browsel-tab-manager-bookmark-jump (bookmark)
   "Handler for URL bookmarks created by `browsel-tab-manager-bookmark-default'.
-Reads the URL from BOOKMARK's `filename' entry and dispatches
-via `browse-url'.  Guaranteed to be available whenever
-browsel-tab-manager itself is loaded, so it does not depend on
-`browse-url-bookmark-jump' (not autoloaded in every Emacs) or
-`bmkp-jump-url-browse' (only present with bookmark+)."
+Reads the URL from BOOKMARK's `filename' entry and passes it to
+`browse-url'.  The built-in `bookmark.el' defines no URL-aware
+handler, and `bmkp-jump-url-browse' is defined only by
+`bookmark+'; this function is defined in browsel-tab-manager so
+the default backend works without either."
   (let ((url (bookmark-prop-get bookmark 'filename)))
     (unless (and (stringp url) (not (string-empty-p url)))
       (error "Browsel-tab-manager-bookmark-jump: no URL in bookmark"))

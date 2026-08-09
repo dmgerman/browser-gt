@@ -157,13 +157,20 @@ const SHAPE_ADAPTERS = {
 
   // { id: 123 } -> chrome.tabs.update(123, { active: true })
   // optional { focusWindow: true } also focuses the parent window.
+  //
+  // When focusWindow is requested we (a) focus the window BEFORE
+  // activating the tab and (b) call windows.update({focused:true})
+  // twice.  Chrome on macOS is flaky about cross-window raising when
+  // the app is already frontmost with a different window on top of its
+  // own window stack: a single windows.update sometimes activates the
+  // tab inside its window but leaves a sibling Chrome window covering
+  // it.  Focusing first + repeating the call are the two cheapest
+  // known workarounds; combined they reliably bring the target window
+  // to the front of Chrome's window order.
   async "focus-tab"(payload) {
     if (!payload || typeof payload.id !== "number") {
       throw new Error("focus-tab: payload.id (tab id) required");
     }
-    await safeTabsCall(
-      () => api.tabs.update(payload.id, { active: true }),
-      `tabs.update(${payload.id})`);
     if (payload.focusWindow) {
       const tab = await safeTabsCall(
         () => api.tabs.get(payload.id),
@@ -173,6 +180,18 @@ const SHAPE_ADAPTERS = {
           () => api.windows.update(tab.windowId, { focused: true }),
           `windows.update(${tab.windowId})`);
       }
+      await safeTabsCall(
+        () => api.tabs.update(payload.id, { active: true }),
+        `tabs.update(${payload.id})`);
+      if (tab.windowId !== undefined) {
+        await safeTabsCall(
+          () => api.windows.update(tab.windowId, { focused: true }),
+          `windows.update(${tab.windowId})`);
+      }
+    } else {
+      await safeTabsCall(
+        () => api.tabs.update(payload.id, { active: true }),
+        `tabs.update(${payload.id})`);
     }
     return { status: "ok" };
   },
