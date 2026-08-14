@@ -45,19 +45,21 @@ I have created a video to introduce its features:
    the same protocol and identify themselves to Emacs by name
    (=chrome=, =firefox=) so a single Emacs can drive both at once.
 
-Emacs and the extension must be running.  The extension auto-reconnects, so restarting Emacs is non-disruptive.  Setup for each side is below.
+Emacs and the extension must be running.  The extension
+auto-reconnects, so restarting Emacs is non-disruptive.  Setup for
+each side is below.
 
 Security has been a major concern in the design of this module. Please see [[*Security][Security]] below
 for more information.
 
 =browsel= was inspired by [[https://github.com/bitspook/spookfox][spookfox]], a similar Emacs/Firefox
-integration.  The protocol and handler-registry pattern are adapted
-from it.  A major enhancement is that it provides
-two-way communication: Emacs can invoke browser handlers, and the
-browser can invoke Emacs handlers.
+integration; the protocol and handler-registry pattern are adapted
+from it.  spookfox handles one direction (Emacs to browser); =browsel=
+adds the reverse direction, so the browser can also invoke handlers
+registered by Emacs.
 
-For implementation details — adding new actions, the wire protocol,
-the JSON schemas — see =CONTRIBUTING.org=.
+For implementation details -- adding new actions, the wire protocol,
+the JSON schemas -- see =CONTRIBUTING.org=.
 
 * Quick setup
 
@@ -69,11 +71,9 @@ the short form.
    optional backends for the features you want, and starts the
    WebSocket server.
 
-   From MELPA (=browsel= is published at
-   https://melpa.org/#/browsel):
+   Install from [[https://melpa.org/#/browsel][MELPA]]:
 
    #+begin_src emacs-lisp
-   ;; websocket is required
    (use-package websocket
      :ensure t)
 
@@ -89,39 +89,23 @@ the short form.
      (browsel-start))
    #+end_src
 
-   From a Git checkout (clone the repository, then point =:load-path=
-   at it):
-
-   #+begin_src emacs-lisp
-   (use-package websocket
-     :ensure t)
-
-   (use-package browsel
-     :load-path "/path/to/browsel"
-     :config
-     (require 'browsel-www)
-     (require 'browsel-chatgpt)
-     (require 'browsel-youtube)
-     (require 'browsel-babel)
-     (require 'browsel-tab-manager)
-     (require 'browsel-url-handler)
-     (browsel-start))
-   #+end_src
+   From a Git checkout instead, replace =:ensure t= on the =browsel=
+   form with =:load-path "/path/to/browsel"=.
 
    Comment out any =require= for a feature you do not want.
 
-2. *Load the browser extension.*  Both builds are committed already
-   built; no build step is required.
+2. *Load the browser extension.*  Both builds are committed to the
+   repository already built, so no build step is required.
 
    In Chrome:
    1. Open =chrome://extensions= and turn on *Developer mode* (top right).
    2. Click *Load unpacked* and select =extension/build/chrome/=.
-   3. (Only if you want JavaScript evaluation) open the extension's
-      *Details* page and toggle *Allow User Scripts* on.
+   3. For JavaScript evaluation, open the extension's *Details* page
+      and turn on *Allow User Scripts*.
 
    In Firefox:
    1. Open =about:debugging= and click *This Firefox*.
-   2. Click *Load Temporary Add-on…* and select
+   2. Click *Load Temporary Add-on...* and select
       =extension/build/firefox/manifest.json=.
 
 The popup should show ●  *Connected* within a few seconds.  If it
@@ -132,83 +116,89 @@ does not, click *Reconnect*.
 ** In the Web browser
 
 - Right-click menu items that trigger Emacs actions: org-capture,
-  org-roam-capture, open-in-eww, save-page, save-chatgpt,
-  add-youtube-video, save-youtube-transcript. The actions
-  can inject/execute javascript to build the request to emacs.
+  org-roam-capture (both for the page selection and for a clicked
+  link), open-in-eww, save-page, save-chatgpt, add-youtube-video,
+  save-youtube-transcript.  Each action can inject and execute
+  JavaScript to build the request payload sent to Emacs.
 - Configurable keyboard shortcuts for the same actions.
 - A toolbar popup with live connection status, per-tab permission
   controls, one-click buttons for every action, and a list of tabs
   with granted JS-eval permission (click an entry to switch to that
   tab).
-- Per-tab consent before executing arbitrary JavaScript evaluation: an in-page overlay prompts for permission, and the
-  toolbar icon turns red while consent remains in effect.
+- Per-tab consent before executing arbitrary JavaScript: an in-page
+  overlay prompts for permission, and the toolbar icon turns red
+  while consent remains in effect.
 
 ** In Emacs
 
-- =M-x browsel-tab-jump= — completing-read jumper: pick a tab by
+- =M-x browsel-tab-jump= -- completing-read jumper: pick a tab by
   filter, focus it (ordered most-recently-used first by default).
-- =M-x browsel-tab-manager= — persistent buffer view: dired-style
+- =M-x browsel-tab-manager= -- persistent buffer view: dired-style
   marking, bookmark, filter, sort, refresh.
-- =M-x browsel-org-link= — insert an Org link to the active
+- =M-x browsel-org-link= -- insert an Org link to the active
   browser tab at point.
-- =M-x browsel-selection= — insert the current text selection
+- =M-x browsel-selection= -- insert the current text selection
   from the active browser tab at point.
-- =M-x browsel-scroll-page= — scroll the active tab one viewport
+- =M-x browsel-scroll-page= -- scroll the active tab one viewport
   down; numeric prefix scrolls N pages (negative = back); bare =C-u=
   scrolls one page back.
-- =M-x browsel-video-toggle-play= — toggle play/pause on the first
+- =M-x browsel-video-toggle-play= -- toggle play/pause on the first
   =<video>= element in the active tab.
-- =M-x browsel-video-advance= — seek the first =<video>= forward by
+- =M-x browsel-video-advance= -- seek the first =<video>= forward by
   5 seconds; numeric prefix sets a different N (negative = back);
   bare =C-u= seeks 5 seconds back.
-- =M-x browsel-video-current-time= — insert the current playback
+- =M-x browsel-video-current-time= -- insert the current playback
   time of the first =<video>= as =H:MM:SS= / =M:SS= / =S= (leading
   zero components dropped).
-- =M-x browsel-youtube-org-link= — insert an Org link to the
+- =M-x browsel-youtube-org-link= -- insert an Org link to the
   active YouTube tab at its current playback time (=&t=Ns= in the
   URL, =title @ timestamp= as the description); errors if the tab
   is not on youtube.com / youtu.be or has no video element.
-- =M-x browsel-set-default-client= — when both browsers are
+- =M-x browsel-set-default-client= -- when more than one browser is
   connected, pick which one interactive commands address; =C-u=
   clears the setting.
 - =M-x browsel-browse-url= (or set =browse-url-browser-function=
-  to it) — route a URL to a browser via the bridge; honors per-URL
+  to it) -- route a URL to a browser via the bridge; honors per-URL
   rules in =browsel-url-routes= and focuses an already-open tab
   instead of duplicating it.
 - Org-Babel =browsel-js= source blocks that run JavaScript in the
   active tab and return the value into the org buffer.
 - An elisp API to query and control the browser: list tabs, focus,
-  open, close, evaluate JS with a return value. See the code of
-  ~browsel-tab-manager~ to see how to use it.
+  open, close, evaluate JS with a return value.  See the section
+  [[*Querying and controlling the browser from Emacs][Querying and controlling the browser from Emacs]] below and the
+  source of =browsel-tab-manager= for realistic usage examples.
 
 ** Extensibility
 
-- New actions can be added to the extension.  A new action is a single =config.json= edit plus =make build=; no browser
-  extension code change is required.
+- New actions can be added to the extension.  A new action is a
+  single =config.json= edit plus =make=; no browser extension code
+  change is required.
 
 * Right-click menu actions
 
-| Menu item                              | Where it shows               | What it does                                                 |
-|----------------------------------------+------------------------------+--------------------------------------------------------------|
+| Menu item                              | Where it shows               | What it does                                                   |
+|----------------------------------------+------------------------------+----------------------------------------------------------------|
 | Emacs: org-capture from selection      | right-click on selected text | opens =org-capture= seeded with the selection                  |
-| Emacs: org-roam-capture from selection | right-click on selected text | opens =org-roam-capture=                                       |
+| Emacs: org-roam-capture from selection | right-click on selected text | opens =org-roam-capture= seeded with the selection             |
+| Emacs: org-capture this link           | right-click on a link        | opens =org-capture= seeded with the link URL and text          |
+| Emacs: org-roam-capture this link      | right-click on a link        | opens =org-roam-capture= seeded with the link URL and text     |
 | Emacs: open in eww                     | any page or link             | opens the URL in =eww= inside Emacs                            |
-| Emacs: save page                       | any page                     | archives the main content as an org file                     |
-| Emacs: save ChatGPT conversation       | chatgpt.com pages            | saves the whole conversation as org                          |
-| Emacs: add video for later             | YouTube pages / links        | appends a TODO entry with metadata to the videos file        |
-| Emacs: save transcript                 | YouTube pages / links        | runs =yt-dlp= and writes an org file with clickable timestamps |
+| Emacs: save page                       | any page                     | archives the main content as an org file                       |
+| Emacs: save ChatGPT conversation       | chatgpt.com pages            | saves the whole conversation as org                            |
+| Emacs: add video for later             | YouTube pages / links        | appends a TODO entry with metadata to the videos file          |
+| Emacs: save YouTube transcript         | YouTube pages / links        | runs =yt-dlp= and writes an org file with clickable timestamps |
 
 * Keyboard shortcuts
 
 Bind any of the menu actions at =chrome://extensions/shortcuts=.  A
 few defaults are pre-suggested:
 
-- =Ctrl+Shift+C= → org-capture
-- =Ctrl+Shift+R= → org-roam-capture
-- =Ctrl+Shift+W= → open in eww
-- =Ctrl+Shift+G= → save ChatGPT conversation
+- =Ctrl+Shift+C= -> org-capture
+- =Ctrl+Shift+R= -> org-roam-capture
+- =Ctrl+Shift+W= -> open in eww
+- =Ctrl+Shift+G= -> save ChatGPT conversation
 
-The remaining commands are declared but unbound — Chrome only honors
+The remaining commands are declared but unbound -- Chrome only honors
 four default-bound shortcuts per Chrome extension, so the rest must
 be assigned manually.
 
@@ -230,13 +220,13 @@ a response counts as deny.
 #+attr_html: :width 280
 [[file:doc/popup.png]]
 
-- Connection status to Emacs (●  Connected / Connecting… / Disconnected).
+- Connection status to Emacs (●  Connected / Connecting... / Disconnected).
 - A one-line summary of this tab's eval permission, with buttons to
   grant for 1 hour, grant until tab closes, or revoke.
 - A button for each menu action that triggers it without using the
   right-click menu.  The label on the right shows the assigned
   keyboard shortcut, if any.
-- A "Tabs with permission" list — every tab with granted eval
+- A "Tabs with permission" list -- every tab with granted eval
   rights, showing title, time remaining, and a *Revoke* button.
   Click a row to switch to that tab.
 
@@ -246,10 +236,11 @@ The same =browsel-request= function used for JavaScript
 evaluation also invokes the other handlers the browser extension
 exposes.  The built-in handler names cover the operations Emacs is
 most likely to need: =GET_ALL_TABS= returns the current tab list,
-=GET_ACTIVE_TAB= returns just the focused tabs of each window,
-=OPEN_TAB= creates a new tab at a given URL, =FOCUS_TAB= switches to
-an existing tab, and =CLOSE_TAB= closes one.  Each handler's payload
-keys and response shape are documented in =CONTRIBUTING.org=.
+=GET_ACTIVE_TAB= returns the active tab of the currently focused
+window, =OPEN_TAB= creates a new tab at a given URL, =FOCUS_TAB=
+switches to an existing tab, and =CLOSE_TAB= closes one.  Each
+handler's payload keys and response shape are documented in
+=CONTRIBUTING.org=.
 
 #+begin_src emacs-lisp
 ;; List every open tab as title/url pairs
@@ -265,11 +256,11 @@ keys and response shape are documented in =CONTRIBUTING.org=.
 
 ** API: Enumerating browsers and their tabs
 
-Two stable, higher-level functions sit on top of the raw request
-layer for the common case of "what's out there, and what tabs
-does it have?"  Downstream packages should build on these rather
-than call =browsel-request= directly, so upstream changes to the
-extension side stay invisible.
+Four stable, higher-level functions sit on top of the raw request
+layer for the common case of "what browsers are connected, what
+tabs do they have, and how do I act on one?"  Downstream packages
+should build on these rather than call =browsel-request= directly,
+so upstream changes to the extension side stay invisible.
 
 *=browsel-browsers=* returns the currently-connected browsers as
 a list of plists.  Order matches =browsel-connected-clients=
@@ -277,29 +268,29 @@ a list of plists.  Order matches =browsel-connected-clients=
 
 #+begin_src emacs-lisp
 (browsel-browsers)
-;; => ((:name "chrome"  :instance "eef7ed26-8f17-…")
-;;     (:name "firefox" :instance "9cca5e87-87ac-…"))
+;; => ((:name "chrome"  :instance "eef7ed26-8f17-...")
+;;     (:name "firefox" :instance "9cca5e87-87ac-..."))
 #+end_src
 
 Use =:name= when you need to talk to a browser right now (it's
 what =browsel-request= expects), and =:instance= when you need to
 recognise this same install across Emacs sessions
-(=browsel-clients-file= keeps the name → instance mapping
+(=browsel-clients-file= keeps the name -> instance mapping
 stable, but a downstream package that wants to persist a
 reference of its own should key on the UUID).
 
 *=browsel-browser-tabs &optional BROWSERS=* returns open tabs
 from the selected browsers.
 
-- =nil= — every entry in =browsel-connected-clients=.
-- name string — that single browser only.
-- list of strings — every browser in the list.
+- =nil= -- every entry in =browsel-connected-clients=.
+- name string -- that single browser only.
+- list of strings -- every browser in the list.
 
 Signals =user-error= when no browser is connected, or when any
 requested name is not connected.  Each returned element is the
 extension's raw tab payload extended with two browsel-specific
-keys — =:browsel-browser= (the origin browser's name) and
-=:browsel-instance= (its per-install UUID) — so callers can route
+keys -- =:browsel-browser= (the origin browser's name) and
+=:browsel-instance= (its per-install UUID) -- so callers can route
 follow-up requests back to the right browser without a separate
 lookup.
 
@@ -326,7 +317,10 @@ reads =:id= and =:browsel-browser= from TAB and dispatches
 raises the browser's OS window (and on macOS nudges the browser
 app itself when it is in =browsel-clients-needing-activation=).
 Signals =user-error= when TAB lacks either key or when its
-browser is disconnected.  Returns nil.
+browser is disconnected.  Returns the browser response plist
+(=(:status "ok")= on success, =(:status "error" :message MSG)=
+when the browser rejected the request, typically because the tab
+was closed between fetch and focus).
 
 #+begin_src emacs-lisp
 ;; Focus every open tab whose title matches a regex.
@@ -338,9 +332,13 @@ browser is disconnected.  Returns nil.
 *=browsel-close-tab TAB=* closes TAB in its owning browser.
 Reads =:id= and =:browsel-browser= from TAB and dispatches
 =CLOSE_TAB=.  Signals =user-error= on missing keys or a
-disconnected browser.  Returns nil.  Bypasses in-page
-=beforeunload= prompts — those fire only on user-initiated
-closes — so pages with unsaved form state close silently.
+disconnected browser.  Returns the browser response plist
+(=(:status "ok")= on success, =(:status "error" :message MSG)=
+when the tab was already gone; callers can check
+=(plist-get response :status)= to distinguish the cases).
+Bypasses in-page =beforeunload= prompts -- those fire only on
+user-initiated closes -- so pages with unsaved form state close
+silently.
 
 #+begin_src emacs-lisp
 ;; Close every tab pointing at a specific host.
@@ -350,14 +348,14 @@ closes — so pages with unsaved form state close silently.
     (browsel-close-tab tab)))
 #+end_src
 
-The tab manager uses these functions internally; see the
-[[Jump to a tab]] section for how the aggregated view is
-presented interactively.
+The tab manager uses these functions internally; see
+[[*Tab management][Tab management]] below for how the aggregated view is presented
+interactively.
 
 ** Quick helpers
 
-Three convenience commands wrap the most common
-"grab-from-the-active-tab" operations.  Each does double duty:
+These convenience commands wrap the most common
+"grab-from-the-active-tab" operations.  Each has two behaviours:
 called interactively it inserts the result at point and returns
 nil; called from Lisp it returns the value as a string and inserts
 nothing.
@@ -387,9 +385,9 @@ Lisp examples:
 (browsel-scroll-page 3)
 #+end_src
 
-When two browsers are connected, the helpers (and =browsel-tab-manager=)
-use =browsel-default-client= as the default.  Set it once in your
-config or change it interactively:
+When more than one browser is connected, the helpers (and
+=browsel-tab-manager=) use =browsel-default-client= as the default.
+Set it once in your config or change it interactively:
 
 #+begin_src emacs-lisp
 ;; permanent config
@@ -414,15 +412,15 @@ time by passing the client name explicitly:
 Each connected browser announces itself with a =CLIENT_HELLO= frame
 carrying three fields:
 
-- =client= — the build's kind: =chrome= or =firefox=.  Hard-coded
+- =client= -- the build's kind: =chrome= or =firefox=.  Hard-coded
   per build, immutable.  Emacs uses this for behaviour toggles
   (which browser needs a macOS foreground nudge, which =.app= name
   to =open -a=).
-- =instance= — a per-install UUID generated once on first
+- =instance= -- a per-install UUID generated once on first
   extension load and stored in the extension's =chrome.storage.local=.
   Two profiles of the same browser get two distinct UUIDs because
   storage is profile-scoped.  Reconnects preserve it.
-- =label= — the user-visible display name shown by
+- =label= -- the user-visible display name shown by
   =browsel-connected-clients= and accepted by =browsel-default-client=.
   Defaults to =client=; the extension's *Options* page has a text
   input labelled *Client label* to override it (e.g. =chrome-work=,
@@ -441,11 +439,11 @@ the display name in this order:
 *Why the registry file exists.*  Two unlabelled installs of the
 same browser both want to be =chrome=; without a memory of past
 assignments, whichever one connects first would take the plain name
-and the other would get the suffix — and that order can flip
+and the other would get the suffix -- and that order can flip
 between Emacs sessions, silently redirecting =browsel-default-client
 "chrome"= at a different install after a reboot.
 =browsel-clients-file= (default:
-=~/.emacs.d/browsel-clients.eld=) persists the =instance → name=
+=~/.emacs.d/browsel-clients.eld=) persists the =instance -> name=
 mapping across sessions so the same install keeps its name
 regardless of connection order.  It follows the same convention as
 =savehist-file=, =recentf-save-file=, and =bookmark-default-file=:
@@ -454,7 +452,7 @@ next hello).  Setting =browsel-clients-file= to =nil= disables
 persistence.
 
 A relabel in the extension options page always wins over the
-registry — the new label takes effect on the next hello and is
+registry -- the new label takes effect on the next hello and is
 what gets remembered from then on.  If you want to run several
 installs of the same browser reliably, set a distinct label on
 each; the registry then only matters as a safety net for the
@@ -465,7 +463,7 @@ default case.
 =browsel-url-handler= provides =browsel-browse-url=, a function that
 sends URLs from Emacs to a connected browser.  Set
 =browse-url-browser-function= to it and every URL Emacs opens (org
-links, eww, mu4e, dired, …) is routed to a chosen browser according
+links, eww, mu4e, dired, ...) is routed to a chosen browser according
 to =browsel-url-routes=, optionally into an incognito window.  When
 a tab matching the URL is already open, =browsel-browse-url= focuses
 that tab rather than opening a new one.
@@ -495,13 +493,13 @@ Each route plist accepts:
 | =:pattern=   | yes      | Regex matched anywhere in the URL (no anchors needed)            |
 | =:client=    | yes      | Client to address: ="chrome"=, ="firefox"=, or ="eww"= (open in Emacs's eww) |
 | =:incognito= | no       | When =t=, open in an incognito / private window                  |
-| =:tab-match= | no       | Override for the already-open tab detection; absent → tab URL must contain the requested URL |
+| =:tab-match= | no       | Override for the already-open tab detection; absent -> tab URL must contain the requested URL |
 
 Routing (which client) and tab matching (which open tab) are
 separate concerns:
 
 - *Routing* uses =:pattern=.  The first matching route picks the
-  client and the incognito flag.  No match → =browsel-default-client=,
+  client and the incognito flag.  No match -> =browsel-default-client=,
   non-incognito.
 - *Tab matching* defaults to substring: the tab URL must contain
   the requested URL.  A sub-page of the requested URL still counts
@@ -515,7 +513,7 @@ separate concerns:
   the policy you want.
 
 When the chosen client has a matching tab, it is focused and the
-window raised.  Otherwise a fresh tab is opened — in an incognito
+window raised.  Otherwise a fresh tab is opened -- in an incognito
 window for incognito routes, in the active window otherwise.
 
 *Incognito caveat.*  Opening an incognito tab requires the user to
@@ -535,7 +533,7 @@ and the browser dispatch all see the rewritten URL, so a preprocess
 function that strips a tracker wrapper will also cause an existing
 tab on the unwrapped URL to be reused.
 
-Intended for lossless URL rewriting — un-wrapping tracker links,
+Intended for lossless URL rewriting -- un-wrapping tracker links,
 canonicalizing amp-URLs, stripping known-safe tracking parameters,
 and the like.  Functions must be pure (URL string in, URL string
 out) and must return the input unchanged when they do not apply.
@@ -583,10 +581,10 @@ from every connected browser and route actions back to the owning
 browser.  =browsel-default-client= is intentionally ignored;
 narrow with a prefix argument or a keystroke instead.
 
-*** =browsel-tab-jump= — completing-read jumper
+*** =browsel-tab-jump= -- completing-read jumper
 
 Reads a tab via the minibuffer.  Each candidate renders as
-=[CLIENT ][flags] DOMAIN  TITLE= — the client column appears
+=[CLIENT ][flags] DOMAIN  TITLE= -- the client column appears
 only when two or more browsers are connected.  The =flags= column
 is three characters (=a=ctive, =s=ound audible, =i=ncognito;
 space when unset), each with its own face.
@@ -607,9 +605,9 @@ In-prompt action keys:
 | =M-RET= | show the highlighted tab in its browser window without raising it        |
 | =M-k=   | close the highlighted tab (see =browsel-tab-manager-confirm-close=)      |
 | =C-c c= | copy the URL to the kill ring, stay in the prompt                        |
-| =C-t=   | cycle sort order: =mru= → =title= → =domain= → =window=                  |
+| =C-t=   | cycle sort order: =mru= -> =title= -> =domain= -> =window=                  |
 
-Sort and typed-text are preserved across =M-k= and =C-t= — both
+Sort and typed-text are preserved across =M-k= and =C-t= -- both
 re-fetch and re-enter the prompt with the same filter, so a
 chain of =M-k= presses walks down the list cleanly.
 
@@ -621,7 +619,7 @@ A prefix argument (=C-u M-x browsel-tab-jump=) prompts for one
 browser to restrict to.  Lisp callers can pass a name or a list
 of names as the optional =CLIENTS= argument.
 
-*** =browsel-tab-manager= — buffer view
+*** =browsel-tab-manager= -- buffer view
 
 Opens =*browsel-tab-manager*= in =browsel-tab-manager-mode=
 (a =tabulated-list-mode= derivative).  One line per tab, dired-style
@@ -634,7 +632,7 @@ Columns: an optional Client column, the =[flags]= column, the
 =Age= column (relative time since last access; shown by default,
 toggle with =a=), the Domain column (or URL when toggled), and
 Title.  The one-character prefix left of the Client column is
-the mark tag — =D= for close, =B= for bookmark.
+the mark tag -- =D= for close, =B= for bookmark.
 
 Keymap:
 
@@ -649,13 +647,13 @@ Keymap:
 | =x=          | execute marks: bookmark =B='s, close =D='s (one confirm)  |
 | =D=          | close current tab immediately, no confirmation            |
 | =B=          | bookmark current tab immediately, prompt for name         |
-| =s=          | cycle sort: =mru= → =title= → =domain= → =window=         |
+| =s=          | cycle sort: =mru= -> =title= -> =domain= -> =window=         |
 | =v=          | toggle location column between hostname and full URL      |
-| =r=          | cycle Client column visibility: =auto= → =on= → =off=     |
+| =r=          | cycle Client column visibility: =auto= -> =on= -> =off=     |
 | =a=          | toggle the Age column (relative time since last access)   |
 | =w=          | copy the current tab's URL to the kill ring               |
 | =/=          | regex filter on title / URL / domain (empty clears)       |
-| =/=~= d=     | mark all duplicate tabs for deletion                      |
+| ~= d~        | mark all duplicate tabs for deletion                      |
 | =g=          | refresh from every connected browser                      |
 | =n= / =p=    | next / previous line                                      |
 | =q=          | quit-window                                               |
@@ -667,22 +665,22 @@ versa) replaces the tag rather than layering.
 Bookmarks are stored via =browsel-tab-manager-bookmark-function=
 (a defcustom; default writes a =bookmark-store= record with a
 browsel-owned handler that calls =browse-url= on jump).  Vanilla
-=bookmark-set= alone cannot make URL bookmarks — it captures the
-current buffer's location — so browsel provides its own tiny
+=bookmark-set= alone cannot make URL bookmarks -- it captures the
+current buffer's location -- so browsel provides its own tiny
 handler function and does not rely on external autoloads.  Users
 of bookmark+ can override the defcustom to plug in
 =bmkp-jump-url-browse= for a nicer =*Bookmark List*= classification.
 
 Immediate bookmarking (=B=) prompts for the name (default: tab
 title) and asks before overwriting an existing bookmark.  Batch
-bookmarking via =b= + =x= silently suffixes =<2>=, =<3>=, … on
+bookmarking via =b= + =x= silently suffixes =<2>=, =<3>=, ... on
 name collisions so no existing bookmark is overwritten during a
 batch.
 
 *** =browsel-tab-manager-close-duplicates=
 
-Sweeps duplicate tabs across every connected browser in one
-shot.  Two tabs are duplicates when their URLs match after
+Sweeps duplicate tabs across every connected browser in a single
+operation.  Two tabs are duplicates when their URLs match after
 stripping any =#fragment=; query parameters (=?id=1=) are kept
 distinct.  Pinned tabs are skipped.  The most-recently-accessed
 tab in each duplicate group is kept; the rest are closed after a
@@ -697,7 +695,7 @@ sweep to.
 =browsel-request= is the elisp function that sends a request to
 the browser extension and returns its response.  It is the function
 you call whenever you want Emacs to invoke a handler in the browser
-extension — including running JavaScript in a tab.  The call is
+extension -- including running JavaScript in a tab.  The call is
 synchronous: it blocks until the browser extension replies, or until
 =browsel-request-timeout= (10 seconds by default) elapses,
 whichever happens first.
@@ -708,13 +706,13 @@ Its signature is:
 (browsel-request NAME &optional PAYLOAD CLIENT)
 #+end_src
 
-=NAME= is a string identifying the handler — for example
+=NAME= is a string identifying the handler -- for example
 ="EVAL_IN_ACTIVE_TAB"= to evaluate JavaScript, or ="GET_ALL_TABS"= to
 list the open tabs.  =PAYLOAD= is an optional plist whose keys depend
 on which handler is named; each handler documents the keys it
 recognises.
 
-=CLIENT= is the optional name of a connected browser — currently
+=CLIENT= is the optional name of a connected browser -- currently
 ="chrome"= or ="firefox"=.  When only one browser is connected, omit
 =CLIENT= and the request goes to that browser automatically.  When
 more than one is connected, supply =CLIENT= to pick which browser
@@ -727,7 +725,7 @@ The function returns a plist with two fields you should always check.
 =:status= is the string ="ok"= when the request succeeded and
 ="error"= when something went wrong.  On error, the response also
 carries =:message= with a human-readable explanation.  On success,
-the rest of the response is specific to the handler — for example,
+the rest of the response is specific to the handler -- for example,
 =EVAL_IN_ACTIVE_TAB= populates =:result= with the value produced by
 the script.
 
@@ -736,9 +734,9 @@ keys:
 
 | Key      | Meaning                                                                |
 |----------+------------------------------------------------------------------------|
-| =:code=  | string — the JavaScript to evaluate                                    |
-| =:tabId= | optional integer — target tab (default: the active tab in the current window) |
-| =:world= | optional string — ="USER_SCRIPT"= (default) or ="MAIN"=                |
+| =:code=  | string -- the JavaScript to evaluate                                    |
+| =:tabId= | optional integer -- target tab (default: the active tab in the current window) |
+| =:world= | optional string -- ="USER_SCRIPT"= (default) or ="MAIN"=                |
 
 The =:world= key chooses which JavaScript execution context the
 snippet runs in.  ="USER_SCRIPT"= (the default) is an isolated
@@ -750,13 +748,13 @@ Chrome and Firefox.
 ="MAIN"= shares =window= with the page's own code.  Use it when the
 goal is to read page-framework state (for example
 =window.ytInitialPlayerResponse= on a YouTube watch page) or to call
-functions defined by the page.  ="MAIN"= is *Chrome only* — Firefox
+functions defined by the page.  ="MAIN"= is *Chrome only* -- Firefox
 MV2 has no equivalent and the request will fail with a clear error.
 A block that needs ="MAIN"= is implicitly Chrome-only.
 
 The response =:result= is an array of =InjectionResult= plists, one
 per frame the script ran in.  Each entry carries =:documentId=,
-=:frameId=, and =:result= — the value of the script's last
+=:frameId=, and =:result= -- the value of the script's last
 expression.
 
 If blocking the editor is not appropriate (long-running scripts,
@@ -800,11 +798,11 @@ pattern for extracting it from a single-frame result is:
 
 For one-off JavaScript snippets, writing out a =browsel-request=
 call by hand is more typing than necessary.  The =browsel-babel=
-module provides =org-babel-execute:browsel-js=, which wraps the function
-behind an org-mode source block: the body of the block becomes the
-=:code= payload, and the value of the last JavaScript expression is
-returned as the block's result.  Babel handles the response
-extraction, so the elisp glue is invisible.
+module provides =org-babel-execute:browsel-js=, which exposes the
+same request as an org-mode source block: the body of the block
+becomes the =:code= payload, and the value of the last JavaScript
+expression is returned as the block's result.  Babel handles the
+response extraction, so the elisp glue is invisible.
 
 The block accepts four optional header arguments:
 
@@ -824,8 +822,9 @@ specifies it will fail on Firefox.
 
 *Read the current video playback time:*
 
-(In the examples below, please remove the space between # and +. I have included them so they
-be properly rendered inside the browser)
+(In the examples below, please remove the space between =#= and =+=;
+the spaces are only there so the nested source blocks render inside
+the outer block when this README is displayed as org.)
 
 #+begin_example
 # +begin_src browsel-js
@@ -918,18 +917,18 @@ the rest of =browsel= keeps working without it.
 | =YOUTUBE_TRANSCRIPT=               | =yt-dlp= on =$PATH=               | Errors at fetch time                                        |
 | Rich =YOUTUBE= metadata            | YouTube Data API v3 key           | Capture still works, but without title/duration/description |
 | Live-hover actions in =browsel-tab-jump= | =vertico= completion frontend | Actions target the accepted candidate rather than the row currently highlighted |
-| Optional Emacs-side modules        | corresponding =(require …)= in the use-package =:config= | Their handlers aren't registered; that name returns "Unknown request" |
+| Optional Emacs-side modules        | corresponding =(require ...)= in the use-package =:config= | Their handlers aren't registered; that name returns "Unknown request" |
 
 If you don't load a module (e.g. don't =(require 'browsel-youtube)=),
 none of its external dependencies are needed.
 
 ** Emacs
 
-The elisp files are distributed through MELPA
-(https://melpa.org/#/browsel).  =M-x package-install RET browsel
-RET= installs the core =browsel.el= along with =browsel-www=,
-=browsel-chatgpt=, =browsel-youtube=, and =browsel-babel=.  A Git
-checkout is also supported; point =:load-path= at the clone.
+The elisp files are distributed through [[https://melpa.org/#/browsel][MELPA]].
+=M-x package-install RET browsel RET= installs the core =browsel.el=
+along with =browsel-www=, =browsel-chatgpt=, =browsel-youtube=,
+=browsel-babel=, =browsel-tab-manager=, and =browsel-url-handler=.
+A Git checkout is also supported; point =:load-path= at the clone.
 
 The browser extension under =extension/= is not distributed through
 MELPA; it must be loaded into the Web browser separately (see
@@ -955,25 +954,12 @@ From MELPA:
   (require 'browsel-youtube)     ; YOUTUBE + YOUTUBE_TRANSCRIPT
   (require 'browsel-babel)       ; org-babel browsel-js blocks
   (require 'browsel-tab-manager) ; M-x browsel-tab-manager
+  (require 'browsel-url-handler) ; browsel-browse-url + browsel-url-routes
   (browsel-start))
 #+end_src
 
-From a Git checkout (change =:load-path= to the clone location):
-
-#+begin_src emacs-lisp
-(use-package websocket :ensure t)
-
-(use-package browsel
-  :load-path "~/.emacs.d/modules/browsel"
-  :after websocket
-  :config
-  (require 'browsel-www)
-  (require 'browsel-chatgpt)
-  (require 'browsel-youtube)
-  (require 'browsel-babel)
-  (require 'browsel-tab-manager)
-  (browsel-start))
-#+end_src
+From a Git checkout instead, replace =:ensure t= on the =browsel=
+form with =:load-path "/path/to/browsel"=.
 
 The server binds =127.0.0.1:9130=.  =(browsel-stop)= /
 =(browsel-start)= start and stop it explicitly.  =(setq
@@ -1014,13 +1000,15 @@ unpacked" expects.  No build step is required to use it as shipped.
 
 In Chrome:
 
-1. Turn on Developer mode (top right of =chrome://extensions=).
-2. Click "Load unpacked" and select =extension/build/chrome/=.
-3. Click Details → toggle *Allow User Scripts* on (only needed if you
-   want =EVAL_IN_ACTIVE_TAB= / =browsel-js= blocks to work).
+1. Open =chrome://extensions= and turn on *Developer mode* (top right).
+2. Click *Load unpacked* and select =extension/build/chrome/=.
+3. For JavaScript evaluation (=EVAL_IN_ACTIVE_TAB= and =browsel-js=
+   source blocks), open the extension's *Details* page and turn on
+   *Allow User Scripts*.  Skip this step if you only use the
+   right-click and popup actions.
 
-The popup should turn green within a few seconds.  If not, click
-*Reconnect*.
+The popup's status dot turns green within a few seconds of a
+successful connection.  If it stays red, click *Reconnect*.
 
 ** Firefox extension
 
@@ -1036,39 +1024,48 @@ To load it:
 
 1. Open =about:debugging= in Firefox.
 2. Click *This Firefox* in the left sidebar.
-3. Click *Load Temporary Add-on…*
+3. Click *Load Temporary Add-on...*
 4. Select =extension/build/firefox/manifest.json=.
 
 Temporary add-ons unload when Firefox restarts; a signed XPI build
 is on the to-do list.  The =browser_specific_settings.gecko.id= is
 already set so a signed install would have a stable identity.
 
-** What works the same in both extensions:
+** What works the same in both extensions
 
-Emacs (right-click menu, popup buttons, keyboard commands, content-script relay) and Emacs → browser (=GET_ALL_TABS=,
-=OPEN_TAB=, =FOCUS_TAB=, the capture handlers, etc.) routing.  Each browser identifies itself via =CLIENT_HELLO= and Emacs
-targets one of several connected browsers through the =CLIENT= argument as described above.
+Both directions of the bridge behave identically:
 
-** What differs:
+- *Browser -> Emacs*: right-click menu items, popup buttons,
+  keyboard commands, and content-script relay all reach the same
+  Emacs handlers.
+- *Emacs -> browser*: =GET_ALL_TABS=, =OPEN_TAB=, =FOCUS_TAB=,
+  =CLOSE_TAB=, the capture handlers, and the rest of the request
+  catalog work the same way in either browser.
+
+Each browser identifies itself via =CLIENT_HELLO=, and Emacs
+targets a specific one of several connected browsers through the
+=CLIENT= argument as described above.
+
+** What differs
 
 - =EVAL_IN_ACTIVE_TAB= and =browsel-js= source blocks run in the
   content-script isolated world.  The portable ="USER_SCRIPT"=
   default works on both browsers; passing =:world "MAIN"= is Chrome
   only and a block that needs MAIN will surface a clear error on
   Firefox.
-- Firefox MV2 does not require a "Allow User Scripts" toggle —
+- Firefox MV2 does not require an "Allow User Scripts" toggle --
   =browser.tabs.executeScript= runs without separate user opt-in.
 
 ** Customising
 
-Most things are reachable from the popup → Options page (or
-=chrome://extensions= → Browsel → Extension options):
+Most things are reachable from the popup -> Options page (or
+=chrome://extensions= -> Browsel -> Extension options):
 
-- *Raise Emacs* — a checkbox per action.  When checked, Emacs is
+- *Raise Emacs* -- a checkbox per action.  When checked, Emacs is
   brought to the foreground after that action completes.  Stored in
   browser storage and overrides the bundled defaults without
   requiring a rebuild.
-- *Menus* / *Handlers* — raw JSON editors for additions or changes
+- *Menus* / *Handlers* -- raw JSON editors for additions or changes
   beyond the bundled defaults.
 
 Larger changes (new menus, new content scripts, etc.) are made in
@@ -1093,7 +1090,7 @@ shortcuts all transfer content from the Web browser to Emacs at your
 explicit initiative: you click or invoke the shortcut, the browser
 reads the URL, selection, or page HTML, and the data is sent over
 the WebSocket on =127.0.0.1:9130= to a registered handler in Emacs.
-There is nothing to prompt for in this direction — the user is the
+There is nothing to prompt for in this direction -- the user is the
 one initiating each transfer.  No additional browser permissions
 need to be enabled beyond the developer affordance described above.
 
@@ -1104,7 +1101,7 @@ and =CLOSE_TAB= let elisp running in Emacs read the tab list, switch
 between tabs, open new ones, and close existing ones.  These calls
 are not prompted: any elisp executing in your Emacs can invoke them.
 The capability is roughly equivalent to giving Emacs the ability to
-read its own buffer list — appropriate to the trust you already
+read its own buffer list -- appropriate to the trust you already
 place in your editor.  No additional browser permissions are required.
 
 ** Evaluating JavaScript in tabs
@@ -1115,7 +1112,7 @@ JavaScript inside a tab, which can read the DOM, cookies,
 capability:
 
 1. The Chrome-level toggle *Allow User Scripts* (=chrome://extensions=
-   → Browsel → Details).  When this is off, =EVAL_IN_ACTIVE_TAB=
+   -> Browsel -> Details).  When this is off, =EVAL_IN_ACTIVE_TAB=
    fails with a clear error; every other feature continues to work.
    Leave it off if JavaScript evaluation is not a capability you need.
 
@@ -1158,7 +1155,7 @@ For the deeper threat model and what is /not/ protected, see
 |-------------------------------------------+-------------------------------------------------------------------------------|
 | Popup shows Disconnected                  | Click Reconnect.  If still red: reload the browser extension card (Chrome: =chrome://extensions=; Firefox: =about:debugging=).  If still red: =M-x browsel-start=. |
 | =EVAL_IN_ACTIVE_TAB= errors                | On Chrome: toggle *Allow User Scripts* on in the extension's Details.  On Firefox MV2: only =:world "USER_SCRIPT"= is supported; =:world "MAIN"= is rejected. |
-| Consent overlay never appears             | =chrome://=, =chrome-extension://=, and the Web Store refuse eval — Chrome policy. |
+| Consent overlay never appears             | =chrome://=, =chrome-extension://=, and the Web Store refuse eval -- Chrome policy. |
 | "no client connected" from elisp          | browser extension isn't connected.  Check the popup; reload if needed.         |
 | =browsel-start= says "address in use" | Another process is already on 9130.  =lsof -nP -iTCP:9130 -sTCP:LISTEN= to see which. |
 | Save-page produces no notification        | Check =*Messages*=; the handler logs success/failure there.                    |
@@ -1166,6 +1163,30 @@ For the deeper threat model and what is /not/ protected, see
 * License
 
 GPL-3.0-or-later.  The full license text is in =LICENSE=.
+
+
+* Info manual
+
+The Info version of this README (=browsel.info=) and its =dir= entry
+live at the package root, following the multi-file ELPA convention.
+=package.el= adds the package's directory to =Info-directory-list=
+automatically on activation, so =C-h i= lists =browsel= under the
+=Emacs= category with no user configuration.
+
+For installs that bypass =package.el= (raw =:load-path=, git
+submodule, straight.el without info handling), point Info at the
+package directory once:
+
+#+begin_src emacs-lisp
+(with-eval-after-load 'info
+  (info-initialize)
+  (add-to-list 'Info-directory-list
+               (file-name-directory (locate-library "browsel"))))
+#+end_src
+
+After editing =README.org=, regenerate the Info file with =make
+info=.  Both =browsel.info= and =dir= are committed source-of-truth
+artifacts and are refreshed together.
 
 
 * Adding a new action or modifying the protocol

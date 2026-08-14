@@ -1,0 +1,1450 @@
+This is browsel.info, produced by makeinfo version 7.3 from
+browsel.texi.
+
+INFO-DIR-SECTION Emacs
+START-INFO-DIR-ENTRY
+* browsel: (browsel).   Bidirectional communication with the web browser including a tab manager.
+END-INFO-DIR-ENTRY
+
+
+File: browsel.info,  Node: Top,  Next: Introduction,  Up: (dir)
+
+browsel
+*******
+
+* Menu:
+
+* Introduction::
+* Quick setup::
+* Features::
+* Right-click menu actions::
+* Keyboard shortcuts::
+* Per-tab eval consent::
+* The popup::
+* Querying and controlling the browser from Emacs::
+* Run JavaScript in any tab from Emacs::
+* Setup::
+* Security::
+* Troubleshooting::
+* License::
+* Info manual::
+* Adding a new action or modifying the protocol::
+
+-- The Detailed Node Listing --
+
+Features
+
+* In the Web browser::
+* In Emacs::
+* Extensibility::
+
+Querying and controlling the browser from Emacs
+
+* API Enumerating browsers and their tabs::
+* Quick helpers::
+* Client names and how they persist::
+* Route URLs through browsel::
+* Tab management::
+
+Run JavaScript in any tab from Emacs
+
+* browsel-request::
+* Minimal example::
+* browsel-js source blocks::
+
+Setup
+
+* Requirements::
+* Emacs::
+* Chrome extension::
+* Firefox extension::
+* What works the same in both extensions::
+* What differs::
+* Customising::
+
+Security
+
+* Sending content from the Web browser to Emacs::
+* Querying and controlling tabs from Emacs::
+* Evaluating JavaScript in tabs::
+* Pausing the bridge without uninstalling::
+* The WebSocket itself::
+
+
+File: browsel.info,  Node: Introduction,  Next: Quick setup,  Prev: Top,  Up: Top
+
+Introduction
+************
+
+‘browsel’ is a module that allows Emacs and a Web browser to communicate
+with each other, in both directions.
+
+   • from emacs:
+        • manage tabs (MRU ordered by default)
+        • URL handler
+             • including the ability to route different urls to
+               different browsers
+        • control a video playing
+        • babel support to execute in the current tab (or tab with
+          specific id)
+        • *note build your own commands to interact with the browser:
+          Querying and controlling the browser from Emacs.
+
+   • Extensible browser menu that requests Emacs to do something.
+     Currently:
+        • org-capture
+        • org-roam-capture
+        • save current video transcript
+        • save current video info
+        • save current ChatGPT session to an org file
+        • save current page in org
+
+   A video introduction is available on YouTube:
+
+   browsel - video introduction
+(https://www.youtube.com/watch?v=8nSiG_hMZWI)
+
+   ‘browsel’ is composed of two parts:
+
+  1. *An Emacs side*.  A WebSocket server on ‘127.0.0.1:9130’ that
+     registers handlers for actions initiated from the browser, plus an
+     elisp API for actions Emacs initiates.
+  2. *A browser extension*.  A WebExtension that connects to the Emacs
+     server, registers the right-click menu items, implements the
+     toolbar icon and the popup, and routes requests in both directions.
+     Two builds ship from the same sources: a Chrome Manifest V3 build
+     and a Firefox Manifest V2 build.  Both speak the same protocol and
+     identify themselves to Emacs by name (‘chrome’, ‘firefox’) so a
+     single Emacs can drive both at once.
+
+   Emacs and the extension must be running.  The extension
+auto-reconnects, so restarting Emacs is non-disruptive.  Setup for each
+side is below.
+
+   Security has been a major concern in the design of this module.
+Please see *note Security: Security. below for more information.
+
+   ‘browsel’ was inspired by spookfox
+(https://github.com/bitspook/spookfox), a similar Emacs/Firefox
+integration; the protocol and handler-registry pattern are adapted from
+it.  spookfox handles one direction (Emacs to browser); ‘browsel’ adds
+the reverse direction, so the browser can also invoke handlers
+registered by Emacs.
+
+   For implementation details - adding new actions, the wire protocol,
+the JSON schemas - see ‘CONTRIBUTING.org’.
+
+
+File: browsel.info,  Node: Quick setup,  Next: Features,  Prev: Introduction,  Up: Top
+
+Quick setup
+***********
+
+The full setup is documented in the *Setup* section below; this is the
+short form.
+
+  1. *Configure and start the Emacs side.*  Add a ‘use-package’ form to
+     your Emacs configuration that loads ‘browsel’, requires the
+     optional backends for the features you want, and starts the
+     WebSocket server.
+
+     Install from MELPA (https://melpa.org/#/browsel):
+
+          (use-package websocket
+            :ensure t)
+
+          (use-package browsel
+            :ensure t
+            :config
+            (require 'browsel-www)         ; SAVE_PAGE
+            (require 'browsel-chatgpt)     ; CHATGPT
+            (require 'browsel-youtube)     ; YOUTUBE + YOUTUBE_TRANSCRIPT
+            (require 'browsel-babel)       ; org-babel browsel-js blocks
+            (require 'browsel-tab-manager) ; M-x browsel-tab-manager
+            (require 'browsel-url-handler) ; browsel-browse-url + browsel-url-routes
+            (browsel-start))
+
+     From a Git checkout instead, replace ‘:ensure t’ on the ‘browsel’
+     form with ‘:load-path "/path/to/browsel"’.
+
+     Comment out any ‘require’ for a feature you do not want.
+
+  2. *Load the browser extension.*  Both builds are committed to the
+     repository already built, so no build step is required.
+
+     In Chrome:
+       1. Open ‘chrome://extensions’ and turn on *Developer mode* (top
+          right).
+       2. Click *Load unpacked* and select ‘extension/build/chrome/’.
+       3. For JavaScript evaluation, open the extension's *Details* page
+          and turn on *Allow User Scripts*.
+
+     In Firefox:
+       1. Open ‘about:debugging’ and click *This Firefox*.
+       2. Click *Load Temporary Add-on...* and select
+          ‘extension/build/firefox/manifest.json’.
+
+   The popup should show ● *Connected* within a few seconds.  If it does
+not, click *Reconnect*.
+
+
+File: browsel.info,  Node: Features,  Next: Right-click menu actions,  Prev: Quick setup,  Up: Top
+
+Features
+********
+
+* Menu:
+
+* In the Web browser::
+* In Emacs::
+* Extensibility::
+
+
+File: browsel.info,  Node: In the Web browser,  Next: In Emacs,  Up: Features
+
+In the Web browser
+==================
+
+   • Right-click menu items that trigger Emacs actions: org-capture,
+     org-roam-capture (both for the page selection and for a clicked
+     link), open-in-eww, save-page, save-chatgpt, add-youtube-video,
+     save-youtube-transcript.  Each action can inject and execute
+     JavaScript to build the request payload sent to Emacs.
+   • Configurable keyboard shortcuts for the same actions.
+   • A toolbar popup with live connection status, per-tab permission
+     controls, one-click buttons for every action, and a list of tabs
+     with granted JS-eval permission (click an entry to switch to that
+     tab).
+   • Per-tab consent before executing arbitrary JavaScript: an in-page
+     overlay prompts for permission, and the toolbar icon turns red
+     while consent remains in effect.
+
+
+File: browsel.info,  Node: In Emacs,  Next: Extensibility,  Prev: In the Web browser,  Up: Features
+
+In Emacs
+========
+
+   • ‘M-x browsel-tab-jump’ - completing-read jumper: pick a tab by
+     filter, focus it (ordered most-recently-used first by default).
+   • ‘M-x browsel-tab-manager’ - persistent buffer view: dired-style
+     marking, bookmark, filter, sort, refresh.
+   • ‘M-x browsel-org-link’ - insert an Org link to the active browser
+     tab at point.
+   • ‘M-x browsel-selection’ - insert the current text selection from
+     the active browser tab at point.
+   • ‘M-x browsel-scroll-page’ - scroll the active tab one viewport
+     down; numeric prefix scrolls N pages (negative = back); bare ‘C-u’
+     scrolls one page back.
+   • ‘M-x browsel-video-toggle-play’ - toggle play/pause on the first
+     ‘<video>’ element in the active tab.
+   • ‘M-x browsel-video-advance’ - seek the first ‘<video>’ forward by 5
+     seconds; numeric prefix sets a different N (negative = back); bare
+     ‘C-u’ seeks 5 seconds back.
+   • ‘M-x browsel-video-current-time’ - insert the current playback time
+     of the first ‘<video>’ as ‘H:MM:SS’ / ‘M:SS’ / ‘S’ (leading zero
+     components dropped).
+   • ‘M-x browsel-youtube-org-link’ - insert an Org link to the active
+     YouTube tab at its current playback time (‘&t=Ns’ in the URL,
+     ‘title @ timestamp’ as the description); errors if the tab is not
+     on youtube.com / youtu.be or has no video element.
+   • ‘M-x browsel-set-default-client’ - when more than one browser is
+     connected, pick which one interactive commands address; ‘C-u’
+     clears the setting.
+   • ‘M-x browsel-browse-url’ (or set ‘browse-url-browser-function’ to
+     it) - route a URL to a browser via the bridge; honors per-URL rules
+     in ‘browsel-url-routes’ and focuses an already-open tab instead of
+     duplicating it.
+   • Org-Babel ‘browsel-js’ source blocks that run JavaScript in the
+     active tab and return the value into the org buffer.
+   • An elisp API to query and control the browser: list tabs, focus,
+     open, close, evaluate JS with a return value.  See the section
+     *note Querying and controlling the browser from Emacs: Querying and
+     controlling the browser from Emacs. below and the source of
+     ‘browsel-tab-manager’ for realistic usage examples.
+
+
+File: browsel.info,  Node: Extensibility,  Prev: In Emacs,  Up: Features
+
+Extensibility
+=============
+
+   • New actions can be added to the extension.  A new action is a
+     single ‘config.json’ edit plus ‘make’; no browser extension code
+     change is required.
+
+
+File: browsel.info,  Node: Right-click menu actions,  Next: Keyboard shortcuts,  Prev: Features,  Up: Top
+
+Right-click menu actions
+************************
+
+Menu item                                Where it shows                 What it does
+-----------------------------------------------------------------------------------------------------------------------------------------
+Emacs: org-capture from selection        right-click on selected text   opens ‘org-capture’ seeded with the selection
+Emacs: org-roam-capture from selection   right-click on selected text   opens ‘org-roam-capture’ seeded with the selection
+Emacs: org-capture this link             right-click on a link          opens ‘org-capture’ seeded with the link URL and text
+Emacs: org-roam-capture this link        right-click on a link          opens ‘org-roam-capture’ seeded with the link URL and text
+Emacs: open in eww                       any page or link               opens the URL in ‘eww’ inside Emacs
+Emacs: save page                         any page                       archives the main content as an org file
+Emacs: save ChatGPT conversation         chatgpt.com pages              saves the whole conversation as org
+Emacs: add video for later               YouTube pages / links          appends a TODO entry with metadata to the videos file
+Emacs: save YouTube transcript           YouTube pages / links          runs ‘yt-dlp’ and writes an org file with clickable timestamps
+
+
+File: browsel.info,  Node: Keyboard shortcuts,  Next: Per-tab eval consent,  Prev: Right-click menu actions,  Up: Top
+
+Keyboard shortcuts
+******************
+
+Bind any of the menu actions at ‘chrome://extensions/shortcuts’.  A few
+defaults are pre-suggested:
+
+   • ‘Ctrl+Shift+C’ -> org-capture
+   • ‘Ctrl+Shift+R’ -> org-roam-capture
+   • ‘Ctrl+Shift+W’ -> open in eww
+   • ‘Ctrl+Shift+G’ -> save ChatGPT conversation
+
+   The remaining commands are declared but unbound - Chrome only honors
+four default-bound shortcuts per Chrome extension, so the rest must be
+assigned manually.
+
+
+File: browsel.info,  Node: Per-tab eval consent,  Next: The popup,  Prev: Keyboard shortcuts,  Up: Top
+
+Per-tab eval consent
+********************
+
+The toolbar icon is purple by default.  It turns *red* on tabs that have
+granted Emacs permission to evaluate JavaScript on them.  Closing the
+tab revokes the grant.
+
+   The first ‘EVAL_IN_ACTIVE_TAB’ request on a tab displays an in-page
+overlay showing the code about to run, with four buttons: *Deny*, *Allow
+once*, *Allow 1 hour*, *Allow this tab*.  30 seconds without a response
+counts as deny.
+
+
+File: browsel.info,  Node: The popup,  Next: Querying and controlling the browser from Emacs,  Prev: Per-tab eval consent,  Up: Top
+
+The popup
+*********
+
+ [image src="doc/popup.png" ]
+
+   • Connection status to Emacs (● Connected / Connecting... /
+     Disconnected).
+   • A one-line summary of this tab's eval permission, with buttons to
+     grant for 1 hour, grant until tab closes, or revoke.
+   • A button for each menu action that triggers it without using the
+     right-click menu.  The label on the right shows the assigned
+     keyboard shortcut, if any.
+   • A "Tabs with permission" list - every tab with granted eval rights,
+     showing title, time remaining, and a *Revoke* button.  Click a row
+     to switch to that tab.
+
+
+File: browsel.info,  Node: Querying and controlling the browser from Emacs,  Next: Run JavaScript in any tab from Emacs,  Prev: The popup,  Up: Top
+
+Querying and controlling the browser from Emacs
+***********************************************
+
+The same ‘browsel-request’ function used for JavaScript evaluation also
+invokes the other handlers the browser extension exposes.  The built-in
+handler names cover the operations Emacs is most likely to need:
+‘GET_ALL_TABS’ returns the current tab list, ‘GET_ACTIVE_TAB’ returns
+the active tab of the currently focused window, ‘OPEN_TAB’ creates a new
+tab at a given URL, ‘FOCUS_TAB’ switches to an existing tab, and
+‘CLOSE_TAB’ closes one.  Each handler's payload keys and response shape
+are documented in ‘CONTRIBUTING.org’.
+
+     ;; List every open tab as title/url pairs
+     (mapcar (lambda (tab) (cons (plist-get tab :title) (plist-get tab :url)))
+             (browsel-request "GET_ALL_TABS" nil))
+
+     ;; Switch to a tab by id (and focus its window if it is in another window)
+     (browsel-request "FOCUS_TAB" '(:id 1234 :focusWindow t))
+
+     ;; Open a new tab
+     (browsel-request "OPEN_TAB" '(:url "https://example.com"))
+
+* Menu:
+
+* API Enumerating browsers and their tabs::
+* Quick helpers::
+* Client names and how they persist::
+* Route URLs through browsel::
+* Tab management::
+
+
+File: browsel.info,  Node: API Enumerating browsers and their tabs,  Next: Quick helpers,  Up: Querying and controlling the browser from Emacs
+
+API: Enumerating browsers and their tabs
+========================================
+
+Four stable, higher-level functions sit on top of the raw request layer
+for the common case of "what browsers are connected, what tabs do they
+have, and how do I act on one?"  Downstream packages should build on
+these rather than call ‘browsel-request’ directly, so upstream changes
+to the extension side stay invisible.
+
+   *‘browsel-browsers’* returns the currently-connected browsers as a
+list of plists.  Order matches ‘browsel-connected-clients’ (newest
+connection first).
+
+     (browsel-browsers)
+     ;; => ((:name "chrome"  :instance "eef7ed26-8f17-...")
+     ;;     (:name "firefox" :instance "9cca5e87-87ac-..."))
+
+   Use ‘:name’ when you need to talk to a browser right now (it's what
+‘browsel-request’ expects), and ‘:instance’ when you need to recognise
+this same install across Emacs sessions (‘browsel-clients-file’ keeps
+the name -> instance mapping stable, but a downstream package that wants
+to persist a reference of its own should key on the UUID).
+
+   *‘browsel-browser-tabs &optional BROWSERS’* returns open tabs from
+the selected browsers.
+
+   • ‘nil’ - every entry in ‘browsel-connected-clients’.
+   • name string - that single browser only.
+   • list of strings - every browser in the list.
+
+   Signals ‘user-error’ when no browser is connected, or when any
+requested name is not connected.  Each returned element is the
+extension's raw tab payload extended with two browsel-specific keys -
+‘:browsel-browser’ (the origin browser's name) and ‘:browsel-instance’
+(its per-install UUID) - so callers can route follow-up requests back to
+the right browser without a separate lookup.
+
+     ;; Every tab from every connected browser.
+     (browsel-browser-tabs)
+
+     ;; Only Chrome.
+     (browsel-browser-tabs "chrome")
+
+     ;; Chrome + a Firefox-work profile.
+     (browsel-browser-tabs '("chrome" "firefox-work"))
+
+     ;; Focus a tab back on the browser it came from.
+     (dolist (tab (browsel-browser-tabs))
+       (when (string-match-p "example\\.com" (or (plist-get tab :url) ""))
+         (browsel-focus-tab tab t)))
+
+   *‘browsel-focus-tab TAB &optional FOCUS-WINDOW’* switches the owning
+browser to TAB (a plist from ‘browsel-browser-tabs’).  It reads ‘:id’
+and ‘:browsel-browser’ from TAB and dispatches ‘FOCUS_TAB’ to the
+correct browser; FOCUS-WINDOW non-nil also raises the browser's OS
+window (and on macOS nudges the browser app itself when it is in
+‘browsel-clients-needing-activation’).  Signals ‘user-error’ when TAB
+lacks either key or when its browser is disconnected.  Returns the
+browser response plist (‘(:status "ok")’ on success, ‘(:status "error"
+:message MSG)’ when the browser rejected the request, typically because
+the tab was closed between fetch and focus).
+
+     ;; Focus every open tab whose title matches a regex.
+     (dolist (tab (browsel-browser-tabs))
+       (when (string-match-p "Inbox" (or (plist-get tab :title) ""))
+         (browsel-focus-tab tab t)))
+
+   *‘browsel-close-tab TAB’* closes TAB in its owning browser.  Reads
+‘:id’ and ‘:browsel-browser’ from TAB and dispatches ‘CLOSE_TAB’.
+Signals ‘user-error’ on missing keys or a disconnected browser.  Returns
+the browser response plist (‘(:status "ok")’ on success, ‘(:status
+"error" :message MSG)’ when the tab was already gone; callers can check
+‘(plist-get response :status)’ to distinguish the cases).  Bypasses
+in-page ‘beforeunload’ prompts - those fire only on user-initiated
+closes - so pages with unsaved form state close silently.
+
+     ;; Close every tab pointing at a specific host.
+     (dolist (tab (browsel-browser-tabs))
+       (when (equal (url-host (url-generic-parse-url (or (plist-get tab :url) "")))
+                    "example.com")
+         (browsel-close-tab tab)))
+
+   The tab manager uses these functions internally; see *note Tab
+management: Tab management. below for how the aggregated view is
+presented interactively.
+
+
+File: browsel.info,  Node: Quick helpers,  Next: Client names and how they persist,  Prev: API Enumerating browsers and their tabs,  Up: Querying and controlling the browser from Emacs
+
+Quick helpers
+=============
+
+These convenience commands wrap the most common
+"grab-from-the-active-tab" operations.  Each has two behaviours: called
+interactively it inserts the result at point and returns nil; called
+from Lisp it returns the value as a string and inserts nothing.
+
+Command                        Interactive use                                                                        Lisp return value
+---------------------------------------------------------------------------------------------------------------------------------------------------------------
+‘browsel-org-link’             inserts ‘[[URL][TITLE]]’ for the active tab at point                                   the link string
+‘browsel-selection’            inserts the active tab's selected text at point                                        the selection (empty string when none)
+‘browsel-scroll-page’          scrolls the active tab one viewport (sign-honored numeric prefix; bare ‘C-u’ = back)   nil (the eval response)
+‘browsel-video-toggle-play’    toggles play/pause on the first ‘<video>’ element                                      interactive only
+‘browsel-video-advance’        seeks the first ‘<video>’ by 5 seconds (numeric prefix N; bare ‘C-u’ = back)           interactive only
+‘browsel-video-current-time’   inserts the first ‘<video>’'s current time (‘H:MM:SS’ / ‘M:SS’ / ‘S’)                  the timestamp string
+‘browsel-youtube-org-link’     inserts ‘[[URL&t=Ns][TITLE @ TIMESTAMP]]’ for the active YouTube tab                   the link string
+
+   Lisp examples:
+
+     ;; Build an org link for whatever is in the active tab.
+     (let ((link (browsel-org-link)))
+       ...)
+
+     ;; Read the user's current page selection.
+     (let ((quote (browsel-selection)))
+       ...)
+
+     ;; Programmatic scroll, three pages down.
+     (browsel-scroll-page 3)
+
+   When more than one browser is connected, the helpers (and
+‘browsel-tab-manager’) use ‘browsel-default-client’ as the default.  Set
+it once in your config or change it interactively:
+
+     ;; permanent config
+     (setq browsel-default-client "chrome")
+
+   Or ‘M-x browsel-set-default-client’ to pick the active browser for
+the rest of the session (‘C-u’ clears the setting).  If no default is
+set and a multi-client command runs, the first prompt's answer is
+remembered for subsequent commands in the session.
+
+   Programmatic Lisp callers can still talk to either browser at any
+time by passing the client name explicitly:
+
+     (browsel-org-link "firefox")
+     (browsel-request "GET_ALL_TABS" nil "chrome")
+
+
+File: browsel.info,  Node: Client names and how they persist,  Next: Route URLs through browsel,  Prev: Quick helpers,  Up: Querying and controlling the browser from Emacs
+
+Client names and how they persist
+=================================
+
+Each connected browser announces itself with a ‘CLIENT_HELLO’ frame
+carrying three fields:
+
+   • ‘client’ - the build's kind: ‘chrome’ or ‘firefox’.  Hard-coded per
+     build, immutable.  Emacs uses this for behaviour toggles (which
+     browser needs a macOS foreground nudge, which ‘.app’ name to ‘open
+     -a’).
+   • ‘instance’ - a per-install UUID generated once on first extension
+     load and stored in the extension's ‘chrome.storage.local’.  Two
+     profiles of the same browser get two distinct UUIDs because storage
+     is profile-scoped.  Reconnects preserve it.
+   • ‘label’ - the user-visible display name shown by
+     ‘browsel-connected-clients’ and accepted by
+     ‘browsel-default-client’.  Defaults to ‘client’; the extension's
+     *Options* page has a text input labelled *Client label* to override
+     it (e.g.  ‘chrome-work’, ‘gmail’).
+
+   *How the final name is chosen.*  When a hello arrives, Emacs picks
+the display name in this order:
+
+  1. If the user has set a label, use it.  On collision with another
+     live client, append ‘-<first-6-hex>’ of the instance UUID.
+  2. Otherwise, if the instance is remembered in ‘browsel-clients-file’,
+     reuse the name it had last time.
+  3. Otherwise, use the client kind (‘chrome’ / ‘firefox’), suffixing
+     with UUID hex if that kind is already taken.
+
+   *Why the registry file exists.*  Two unlabelled installs of the same
+browser both want to be ‘chrome’; without a memory of past assignments,
+whichever one connects first would take the plain name and the other
+would get the suffix - and that order can flip between Emacs sessions,
+silently redirecting ‘browsel-default-client "chrome"’ at a different
+install after a reboot.  ‘browsel-clients-file’ (default:
+‘~/.emacs.d/browsel-clients.eld’) persists the ‘instance -> name’
+mapping across sessions so the same install keeps its name regardless of
+connection order.  It follows the same convention as ‘savehist-file’,
+‘recentf-save-file’, and ‘bookmark-default-file’: one elisp form, atomic
+write, safe to delete (repopulates on the next hello).  Setting
+‘browsel-clients-file’ to ‘nil’ disables persistence.
+
+   A relabel in the extension options page always wins over the registry
+- the new label takes effect on the next hello and is what gets
+remembered from then on.  If you want to run several installs of the
+same browser reliably, set a distinct label on each; the registry then
+only matters as a safety net for the default case.
+
+
+File: browsel.info,  Node: Route URLs through browsel,  Next: Tab management,  Prev: Client names and how they persist,  Up: Querying and controlling the browser from Emacs
+
+Route URLs through browsel
+==========================
+
+‘browsel-url-handler’ provides ‘browsel-browse-url’, a function that
+sends URLs from Emacs to a connected browser.  Set
+‘browse-url-browser-function’ to it and every URL Emacs opens (org
+links, eww, mu4e, dired, ...) is routed to a chosen browser according to
+‘browsel-url-routes’, optionally into an incognito window.  When a tab
+matching the URL is already open, ‘browsel-browse-url’ focuses that tab
+rather than opening a new one.
+
+     ;; One-liner to send everything through browsel using browsel-default-client.
+     (setq browse-url-browser-function #'browsel-browse-url)
+
+     ;; Per-URL routing: first match wins.
+     (setq browsel-url-routes
+           '((:pattern "github\\.com/"
+              :client  "chrome")
+             (:pattern "app\\.slack\\.com/"
+              :client  "chrome"
+              :tab-match "app\\.slack\\.com/")
+             (:pattern "news\\.ycombinator\\.com/"
+              :client  "firefox"
+              :incognito t)
+             (:pattern "sachachua\\.com/"
+              :client  "eww")))   ; opens in Emacs's eww
+
+   Each route plist accepts:
+
+Key            Required   Purpose
+--------------------------------------------------------------------------------------------------------------------------
+‘:pattern’     yes        Regex matched anywhere in the URL (no anchors needed)
+‘:client’      yes        Client to address: ‘"chrome"’, ‘"firefox"’, or ‘"eww"’ (open in Emacs's eww)
+‘:incognito’   no         When ‘t’, open in an incognito / private window
+‘:tab-match’   no         Override for the already-open tab detection; absent -> tab URL must contain the requested URL
+
+   Routing (which client) and tab matching (which open tab) are separate
+concerns:
+
+   • *Routing* uses ‘:pattern’.  The first matching route picks the
+     client and the incognito flag.  No match ->
+     ‘browsel-default-client’, non-incognito.
+   • *Tab matching* defaults to substring: the tab URL must contain the
+     requested URL.  A sub-page of the requested URL still counts
+     (opening ‘https://github.com/x/y’ focuses a tab on
+     ‘https://github.com/x/y/issues/3’), but an unrelated page on the
+     same domain does not.  Bare-domain requests get a small relaxation:
+     the requested host (with leading ‘www.’ stripped) is the substring
+     needle, so opening ‘https://amazon.ca/’ still reuses an open tab on
+     ‘https://www.amazon.ca/dp/B1234’.  A route's ‘:tab-match’ regex
+     overrides this default when the default isn't the policy you want.
+
+   When the chosen client has a matching tab, it is focused and the
+window raised.  Otherwise a fresh tab is opened - in an incognito window
+for incognito routes, in the active window otherwise.
+
+   *Incognito caveat.*  Opening an incognito tab requires the user to
+toggle *Allow in incognito* for the browsel extension on
+‘chrome://extensions’ (or the Firefox equivalent).  Without that toggle
+the extension cannot enumerate or create incognito windows;
+‘browsel-browse-url’ detects the failure, warns, and falls back to a
+normal tab so the URL still reaches the user.
+
+Rewrite URLs before dispatch
+----------------------------
+
+‘browsel-browse-url-preprocess-functions’ is an abnormal hook of
+URL-rewriting functions run before routing.  Each function receives a
+URL string and returns a URL string; functions apply in list order and
+the output of one is fed into the next.  Routing, tab matching, and the
+browser dispatch all see the rewritten URL, so a preprocess function
+that strips a tracker wrapper will also cause an existing tab on the
+unwrapped URL to be reused.
+
+   Intended for lossless URL rewriting - un-wrapping tracker links,
+canonicalizing amp-URLs, stripping known-safe tracking parameters, and
+the like.  Functions must be pure (URL string in, URL string out) and
+must return the input unchanged when they do not apply.
+
+   Example: un-mangle Microsoft Exchange "Safe Links" wrappers so
+‘browsel’ opens the real destination rather than the scanner URL.  The
+wrapper preserves the original URL verbatim, percent-encoded, inside its
+‘url’ query parameter, so the decode is lossless:
+
+     (require 'url-parse)
+     (require 'url-util)
+
+     (defun my/unmangle-safelinks (url)
+       "Un-wrap Microsoft SafeLinks URLs; return URL unchanged otherwise."
+       (let ((host (ignore-errors
+                     (url-host (url-generic-parse-url url)))))
+         (if (and (stringp host)
+                  (string-suffix-p ".safelinks.protection.outlook.com" host))
+             (let* ((filename (url-filename (url-generic-parse-url url)))
+                    (query    (and (string-match "\\?\\(.*\\)\\'" filename)
+                                   (match-string 1 filename)))
+                    ;; HTML-escaped mail bodies write `&amp;' for `&';
+                    ;; un-escape before splitting on `&' or the `url'
+                    ;; value truncates at the first `&amp;'.
+                    (query    (and query
+                                   (replace-regexp-in-string
+                                    "&amp;" "&" query t t)))
+                    (params   (and query (url-parse-query-string query)))
+                    (wrapped  (cadr (assoc "url" (or params '())))))
+               (or wrapped url))
+           url)))
+
+     (add-hook 'browsel-browse-url-preprocess-functions
+               #'my/unmangle-safelinks)
+
+   A URL forwarded through two tenants can be wrapped twice; iterate the
+decode (with a small cap) if that matters in your mail flow.
+
+
+File: browsel.info,  Node: Tab management,  Prev: Route URLs through browsel,  Up: Querying and controlling the browser from Emacs
+
+Tab management
+==============
+
+Two entry points, same underlying tab list.  Both aggregate tabs from
+every connected browser and route actions back to the owning browser.
+‘browsel-default-client’ is intentionally ignored; narrow with a prefix
+argument or a keystroke instead.
+
+‘browsel-tab-jump’ - completing-read jumper
+-------------------------------------------
+
+Reads a tab via the minibuffer.  Each candidate renders as ‘[CLIENT
+][flags] DOMAIN TITLE’ - the client column appears only when two or more
+browsers are connected.  The ‘flags’ column is three characters
+(=a=ctive, =s=ound audible, =i=ncognito; space when unset), each with
+its own face.
+
+     chrome     [a  ] mail.google.com                 Inbox (28) - xyz@gmail.com
+     firefox    [ s ] www.youtube.com                 2026 F1 Barcelona GP race analysis
+     chrome     [  i] duckduckgo.com                  Search results
+     firefox    [   ] github.com                      GitHub - dmgerman/browsel
+
+   In-prompt action keys:
+
+Key       Action
+--------------------------------------------------------------------------------
+‘?’       help buffer with the legend and the bindings below
+‘RET’     focus the highlighted tab and window, exit
+‘M-RET’   show the highlighted tab in its browser window without raising it
+‘M-k’     close the highlighted tab (see ‘browsel-tab-manager-confirm-close’)
+‘C-c c’   copy the URL to the kill ring, stay in the prompt
+‘C-t’     cycle sort order: ‘mru’ -> ‘title’ -> ‘domain’ -> ‘window’
+
+   Sort and typed-text are preserved across ‘M-k’ and ‘C-t’ - both
+re-fetch and re-enter the prompt with the same filter, so a chain of
+‘M-k’ presses walks down the list cleanly.
+
+   With ‘consult’ loaded, your ‘consult-narrow-key’ filters candidates
+to a single browser in one keystroke (each connected browser becomes a
+narrow choice by first letter of its name).
+
+   A prefix argument (‘C-u M-x browsel-tab-jump’) prompts for one
+browser to restrict to.  Lisp callers can pass a name or a list of names
+as the optional ‘CLIENTS’ argument.
+
+‘browsel-tab-manager’ - buffer view
+-----------------------------------
+
+Opens ‘*browsel-tab-manager*’ in ‘browsel-tab-manager-mode’ (a
+‘tabulated-list-mode’ derivative).  One line per tab, dired-style
+marking, persistent so you can keep it around and refresh with ‘g’.
+
+   The header line shows the current sort key, any active regex filter,
+whether URL view is on, and the tab count.
+
+   Columns: an optional Client column, the ‘[flags]’ column, the ‘Age’
+column (relative time since last access; shown by default, toggle with
+‘a’), the Domain column (or URL when toggled), and Title.  The
+one-character prefix left of the Client column is the mark tag - ‘D’ for
+close, ‘B’ for bookmark.
+
+   Keymap:
+
+Key         Action
+-----------------------------------------------------------------------
+‘RET’       focus tab + raise browser window; stay in manager
+‘M-RET’     preview: focus in browser without raising the window
+‘d’         mark tab for deletion (‘D’ tag), advance
+‘b’         mark tab for bookmarking (‘B’ tag), advance
+‘u’ / ‘U’   unmark current line / unmark all
+‘t’         toggle every mark
+‘x’         execute marks: bookmark ‘B’'s, close ‘D’'s (one confirm)
+‘D’         close current tab immediately, no confirmation
+‘B’         bookmark current tab immediately, prompt for name
+‘s’         cycle sort: ‘mru’ -> ‘title’ -> ‘domain’ -> ‘window’
+‘v’         toggle location column between hostname and full URL
+‘r’         cycle Client column visibility: ‘auto’ -> ‘on’ -> ‘off’
+‘a’         toggle the Age column (relative time since last access)
+‘w’         copy the current tab's URL to the kill ring
+‘/’         regex filter on title / URL / domain (empty clears)
+‘= d’       mark all duplicate tabs for deletion
+‘g’         refresh from every connected browser
+‘n’ / ‘p’   next / previous line
+‘q’         quit-window
+‘?’         ‘describe-mode’ (full binding list, docstring, examples)
+
+   Dired one-mark-per-row: pressing ‘d’ on a ‘B’-marked row (or vice
+versa) replaces the tag rather than layering.
+
+   Bookmarks are stored via ‘browsel-tab-manager-bookmark-function’ (a
+defcustom; default writes a ‘bookmark-store’ record with a browsel-owned
+handler that calls ‘browse-url’ on jump).  Vanilla ‘bookmark-set’ alone
+cannot make URL bookmarks - it captures the current buffer's location -
+so browsel provides its own tiny handler function and does not rely on
+external autoloads.  Users of bookmark+ can override the defcustom to
+plug in ‘bmkp-jump-url-browse’ for a nicer ‘*Bookmark List*’
+classification.
+
+   Immediate bookmarking (‘B’) prompts for the name (default: tab title)
+and asks before overwriting an existing bookmark.  Batch bookmarking via
+‘b’ + ‘x’ silently suffixes ‘<2>’, ‘<3>’, ... on name collisions so no
+existing bookmark is overwritten during a batch.
+
+‘browsel-tab-manager-close-duplicates’
+--------------------------------------
+
+Sweeps duplicate tabs across every connected browser in a single
+operation.  Two tabs are duplicates when their URLs match after
+stripping any ‘#fragment’; query parameters (‘?id=1’) are kept distinct.
+Pinned tabs are skipped.  The most-recently-accessed tab in each
+duplicate group is kept; the rest are closed after a ‘yes-or-no-p’
+confirmation listing the per-browser counts.  A prefix argument prompts
+for a single browser to restrict the sweep to.
+
+
+File: browsel.info,  Node: Run JavaScript in any tab from Emacs,  Next: Setup,  Prev: Querying and controlling the browser from Emacs,  Up: Top
+
+Run JavaScript in any tab from Emacs
+************************************
+
+* Menu:
+
+* browsel-request::
+* Minimal example::
+* browsel-js source blocks::
+
+
+File: browsel.info,  Node: browsel-request,  Next: Minimal example,  Up: Run JavaScript in any tab from Emacs
+
+‘browsel-request’
+=================
+
+‘browsel-request’ is the elisp function that sends a request to the
+browser extension and returns its response.  It is the function you call
+whenever you want Emacs to invoke a handler in the browser extension -
+including running JavaScript in a tab.  The call is synchronous: it
+blocks until the browser extension replies, or until
+‘browsel-request-timeout’ (10 seconds by default) elapses, whichever
+happens first.
+
+   Its signature is:
+
+     (browsel-request NAME &optional PAYLOAD CLIENT)
+
+   ‘NAME’ is a string identifying the handler - for example
+‘"EVAL_IN_ACTIVE_TAB"’ to evaluate JavaScript, or ‘"GET_ALL_TABS"’ to
+list the open tabs.  ‘PAYLOAD’ is an optional plist whose keys depend on
+which handler is named; each handler documents the keys it recognises.
+
+   ‘CLIENT’ is the optional name of a connected browser - currently
+‘"chrome"’ or ‘"firefox"’.  When only one browser is connected, omit
+‘CLIENT’ and the request goes to that browser automatically.  When more
+than one is connected, supply ‘CLIENT’ to pick which browser runs the
+request; the function signals an error if ‘CLIENT’ names a browser that
+is not currently connected, and also signals an error if more than one
+browser is connected and ‘CLIENT’ is omitted.  Use
+‘browsel-connected-clients’ to inspect the current roster.
+
+   The function returns a plist with two fields you should always check.
+‘:status’ is the string ‘"ok"’ when the request succeeded and ‘"error"’
+when something went wrong.  On error, the response also carries
+‘:message’ with a human-readable explanation.  On success, the rest of
+the response is specific to the handler - for example,
+‘EVAL_IN_ACTIVE_TAB’ populates ‘:result’ with the value produced by the
+script.
+
+   When the handler is ‘EVAL_IN_ACTIVE_TAB’, the payload accepts three
+keys:
+
+Key        Meaning
+--------------------------------------------------------------------------------------------
+‘:code’    string - the JavaScript to evaluate
+‘:tabId’   optional integer - target tab (default: the active tab in the current window)
+‘:world’   optional string - ‘"USER_SCRIPT"’ (default) or ‘"MAIN"’
+
+   The ‘:world’ key chooses which JavaScript execution context the
+snippet runs in.  ‘"USER_SCRIPT"’ (the default) is an isolated context:
+it can read and modify the DOM but does not share ‘window’ with the
+page's own code; variables and functions defined by the page are not
+visible from the snippet.  This default works on both Chrome and
+Firefox.
+
+   ‘"MAIN"’ shares ‘window’ with the page's own code.  Use it when the
+goal is to read page-framework state (for example
+‘window.ytInitialPlayerResponse’ on a YouTube watch page) or to call
+functions defined by the page.  ‘"MAIN"’ is *Chrome only* - Firefox MV2
+has no equivalent and the request will fail with a clear error.  A block
+that needs ‘"MAIN"’ is implicitly Chrome-only.
+
+   The response ‘:result’ is an array of ‘InjectionResult’ plists, one
+per frame the script ran in.  Each entry carries ‘:documentId’,
+‘:frameId’, and ‘:result’ - the value of the script's last expression.
+
+   If blocking the editor is not appropriate (long-running scripts,
+calls made from inside another WebSocket callback), use the asynchronous
+variant:
+
+     (browsel-request-async NAME PAYLOAD CALLBACK &optional CLIENT)
+
+   It returns the request id immediately and invokes ‘CALLBACK’ with the
+response plist once the browser extension replies.  Unlike the
+synchronous form, it is safe to use from any context.  ‘CLIENT’ has the
+same meaning as in ‘browsel-request’.
+
+
+File: browsel.info,  Node: Minimal example,  Next: browsel-js source blocks,  Prev: browsel-request,  Up: Run JavaScript in any tab from Emacs
+
+Minimal example
+===============
+
+     (browsel-request "EVAL_IN_ACTIVE_TAB"
+                            '(:code "document.querySelector('video').currentTime"))
+     ;; => (:status "ok"
+     ;;     :result ((:documentId "..." :frameId 0 :result 60.34)))
+
+   The first request to a fresh tab causes the browser extension to
+display the consent overlay; subsequent calls to the same tab go through
+silently until consent is revoked or the tab is closed.
+
+   For most uses you only care about the value returned by the
+JavaScript expression, not the surrounding response envelope.  The
+pattern for extracting it from a single-frame result is:
+
+     (let ((r (browsel-request "EVAL_IN_ACTIVE_TAB"
+                                     '(:code "document.title"))))
+       (plist-get (car (plist-get r :result)) :result))
+     ;; => "Subscriptions - YouTube"
+
+
+File: browsel.info,  Node: browsel-js source blocks,  Prev: Minimal example,  Up: Run JavaScript in any tab from Emacs
+
+‘browsel-js’ source blocks
+==========================
+
+For one-off JavaScript snippets, writing out a ‘browsel-request’ call by
+hand is more typing than necessary.  The ‘browsel-babel’ module provides
+‘org-babel-execute:browsel-js’, which exposes the same request as an
+org-mode source block: the body of the block becomes the ‘:code’
+payload, and the value of the last JavaScript expression is returned as
+the block's result.  Babel handles the response extraction, so the elisp
+glue is invisible.
+
+   The block accepts four optional header arguments:
+
+Argument    Values                          Default
+--------------------------------------------------------------
+‘:world’    ‘"USER_SCRIPT"’ or ‘"MAIN"’     ‘"USER_SCRIPT"’
+‘:tab-id’   integer tab id                  active tab
+‘:frames’   ‘"all"’ for per-frame results   first frame
+‘:client’   ‘"chrome"’ or ‘"firefox"’       sole client
+
+   ‘"USER_SCRIPT"’ is the portable default: the block runs in an
+isolated world that can read and modify the DOM but cannot see
+page-defined globals or functions.  Pass ‘:world "MAIN"’ when the block
+needs to read the page's own ‘window’ state or call functions defined by
+the page; ‘"MAIN"’ is Chrome only and a block that specifies it will
+fail on Firefox.
+
+   *Read the current video playback time:*
+
+   (In the examples below, please remove the space between ‘#’ and ‘+’;
+the spaces are only there so the nested source blocks render inside the
+outer block when this README is displayed as org.)
+
+     # +begin_src browsel-js
+     document.querySelector('video').currentTime
+     # +end_src
+
+   *Pause playback and report the new state:*
+
+     # +begin_src browsel-js
+     const v = document.querySelector('video');
+     v.pause();
+     ({ paused: v.paused, at: v.currentTime })
+     # +end_src
+
+   *Collect several page properties into one object:*
+
+     # +begin_src browsel-js
+     ({ url: location.href,
+        title: document.title,
+        selection: getSelection().toString(),
+        linkCount: document.links.length })
+     # +end_src
+
+   *Run an ‘async’ function and return its resolved value* (the babel
+backend awaits the returned promise):
+
+     # +begin_src browsel-js
+     (async () => {
+       const r = await fetch(location.href);
+       return { status: r.status, length: (await r.text()).length };
+     })()
+     # +end_src
+
+   *Run in a specific tab instead of the active one:*
+
+     # +begin_src browsel-js :tab-id 1234567890
+     document.title
+     # +end_src
+
+   *Return every frame's result (for pages with cross-origin iframes):*
+
+     # +begin_src browsel-js :frames all
+     location.origin
+     # +end_src
+
+   *Pick a browser when more than one is connected:*
+
+     # +begin_src browsel-js :client firefox
+     navigator.userAgent
+     # +end_src
+
+   The ‘:client’ header is the name a browser announced via the
+‘CLIENT_HELLO’ request when it connected (currently ‘"chrome"’ or
+‘"firefox"’).  With one browser connected the block runs there
+automatically and ‘:client’ may be omitted; with more than one, omitting
+‘:client’ signals an error and lists the connected names.
+
+
+File: browsel.info,  Node: Setup,  Next: Security,  Prev: Run JavaScript in any tab from Emacs,  Up: Top
+
+Setup
+*****
+
+* Menu:
+
+* Requirements::
+* Emacs::
+* Chrome extension::
+* Firefox extension::
+* What works the same in both extensions::
+* What differs::
+* Customising::
+
+
+File: browsel.info,  Node: Requirements,  Next: Emacs,  Up: Setup
+
+Requirements
+============
+
+   • Emacs 27.1 or newer.
+   • ‘websocket’ package 1.13 or newer.
+   • Org-mode 9.8 or newer (‘browsel-youtube’'s inline-image refresh
+     calls ‘org-link-preview-region’, which replaced the obsoleted
+     ‘org-display-inline-images’ in Org 9.8).
+   • Chrome / Chromium or Firefox.
+
+   Per-feature.  Each row is needed *only* if you invoke that feature;
+the rest of ‘browsel’ keeps working without it.
+
+Feature                                    Needed                                                       What "missing" looks like
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+‘ORG_ROAM_CAPTURE’ action                  ‘org-roam’ package                                           Errors when the user picks the org-roam-capture menu item
+‘SAVE_PAGE’ / ‘CHATGPT’                    ‘pandoc’ on ‘$PATH’                                          Errors at save time; the right-click action fails
+‘YOUTUBE_TRANSCRIPT’                       ‘yt-dlp’ on ‘$PATH’                                          Errors at fetch time
+Rich ‘YOUTUBE’ metadata                    YouTube Data API v3 key                                      Capture still works, but without title/duration/description
+Live-hover actions in ‘browsel-tab-jump’   ‘vertico’ completion frontend                                Actions target the accepted candidate rather than the row currently highlighted
+Optional Emacs-side modules                corresponding ‘(require ...)’ in the use-package ‘:config’   Their handlers aren't registered; that name returns "Unknown request"
+
+   If you don't load a module (e.g.  don't ‘(require
+'browsel-youtube)’), none of its external dependencies are needed.
+
+
+File: browsel.info,  Node: Emacs,  Next: Chrome extension,  Prev: Requirements,  Up: Setup
+
+Emacs
+=====
+
+The elisp files are distributed through MELPA
+(https://melpa.org/#/browsel).  ‘M-x package-install RET browsel RET’
+installs the core ‘browsel.el’ along with ‘browsel-www’,
+‘browsel-chatgpt’, ‘browsel-youtube’, ‘browsel-babel’,
+‘browsel-tab-manager’, and ‘browsel-url-handler’.  A Git checkout is
+also supported; point ‘:load-path’ at the clone.
+
+   The browser extension under ‘extension/’ is not distributed through
+MELPA; it must be loaded into the Web browser separately (see *Chrome
+extension* or *Firefox extension* below).  Installing only the elisp
+side will start the WebSocket server but the popup status will remain
+Disconnected until the extension is loaded.
+
+   One ‘use-package’ form for the core, with one ‘require’ per optional
+feature; comment out any you do not want loaded.
+
+   From MELPA:
+
+     (use-package websocket :ensure t)
+
+     (use-package browsel
+       :ensure t
+       :after websocket
+       :config
+       (require 'browsel-www)         ; SAVE_PAGE        (web archive)
+       (require 'browsel-chatgpt)     ; CHATGPT          (save conversation)
+       (require 'browsel-youtube)     ; YOUTUBE + YOUTUBE_TRANSCRIPT
+       (require 'browsel-babel)       ; org-babel browsel-js blocks
+       (require 'browsel-tab-manager) ; M-x browsel-tab-manager
+       (require 'browsel-url-handler) ; browsel-browse-url + browsel-url-routes
+       (browsel-start))
+
+   From a Git checkout instead, replace ‘:ensure t’ on the ‘browsel’
+form with ‘:load-path "/path/to/browsel"’.
+
+   The server binds ‘127.0.0.1:9130’.  ‘(browsel-stop)’ /
+‘(browsel-start)’ start and stop it explicitly.  ‘(setq browsel-debug
+t)’ logs every WebSocket frame to the ‘*browsel*’ buffer for protocol
+debugging.
+
+   Configuration variables for paths, output locations, and credentials
+(full list in ‘CONTRIBUTING.org’):
+
+Variable                                      Purpose
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+‘browsel-www-archive-dir’                     where save-page writes archived pages
+‘browsel-chatgpt-dir’                         where save-chatgpt writes conversations
+‘browsel-youtube-videos-file’                 org file the YouTube capture appends to
+‘browsel-youtube-transcript-dir’              where transcripts are written
+‘browsel-youtube-api-key’                     YouTube Data API v3 key (for video metadata)
+‘browsel-org-capture-key’                     org-capture template key for browser captures
+‘browsel-default-client’                      default browser client for every browsel command
+‘browsel-url-routes’                          per-pattern URL routing for ‘browsel-browse-url’
+‘browsel-browse-url-preprocess-functions’     abnormal hook of URL-rewriting functions run before routing
+‘browsel-clients-needing-activation’          client names whose macOS app needs an explicit foreground nudge after focus (default ‘("firefox")’)
+‘browsel-client-app-names’                    fallback macOS application names per client when the PID-based activation can't find the process
+‘browsel-tab-manager-sort’                    initial sort key for both tab commands (default ‘mru’; cycle with ‘C-t’ in jump, ‘s’ in manager)
+‘browsel-tab-manager-confirm-close’           when non-nil, ‘M-k’ (jump) and ‘x’ (manager, with ‘D’ marks) prompt before closing.  ‘D’ in the manager always bypasses.
+‘browsel-tab-manager-domain-column-width’     width of the Domain column
+‘browsel-tab-manager-url-column-width’        width of the URL column when the manager's URL view (‘v’) is on
+‘browsel-tab-manager-client-column-width’     width of the Client column when 2+ browsers are represented
+‘browsel-tab-manager-accessed-column-width’   width of the Age column when the manager's Age view (‘a’) is on
+‘browsel-tab-manager-bookmark-function’       function used by the manager's ‘b’ / ‘B’ actions to save a bookmark; default calls ‘bookmark-store’ with a browsel-owned handler that dispatches via ‘browse-url’
+
+   The full list is in ‘CONTRIBUTING.org’.
+
+
+File: browsel.info,  Node: Chrome extension,  Next: Firefox extension,  Prev: Emacs,  Up: Setup
+
+Chrome extension
+================
+
+The built extension is included in this repository under
+‘extension/build/chrome/’ and is the directory Chrome's "Load unpacked"
+expects.  No build step is required to use it as shipped.
+
+   In Chrome:
+
+  1. Open ‘chrome://extensions’ and turn on *Developer mode* (top
+     right).
+  2. Click *Load unpacked* and select ‘extension/build/chrome/’.
+  3. For JavaScript evaluation (‘EVAL_IN_ACTIVE_TAB’ and ‘browsel-js’
+     source blocks), open the extension's *Details* page and turn on
+     *Allow User Scripts*.  Skip this step if you only use the
+     right-click and popup actions.
+
+   The popup's status dot turns green within a few seconds of a
+successful connection.  If it stays red, click *Reconnect*.
+
+
+File: browsel.info,  Node: Firefox extension,  Next: What works the same in both extensions,  Prev: Chrome extension,  Up: Setup
+
+Firefox extension
+=================
+
+The built Firefox extension is included in this repository under
+‘extension/build/firefox/’ and is a Manifest V2 extension.  As with the
+Chrome build, the directory is committed already built; no build step is
+required to use it as shipped.  MV2 was the deliberate choice here:
+Firefox still supports it indefinitely and provides a genuine persistent
+background page, which holds the WebSocket to Emacs without the
+workarounds MV3 requires.
+
+   To load it:
+
+  1. Open ‘about:debugging’ in Firefox.
+  2. Click *This Firefox* in the left sidebar.
+  3. Click *Load Temporary Add-on...*
+  4. Select ‘extension/build/firefox/manifest.json’.
+
+   Temporary add-ons unload when Firefox restarts; a signed XPI build is
+on the to-do list.  The ‘browser_specific_settings.gecko.id’ is already
+set so a signed install would have a stable identity.
+
+
+File: browsel.info,  Node: What works the same in both extensions,  Next: What differs,  Prev: Firefox extension,  Up: Setup
+
+What works the same in both extensions
+======================================
+
+Both directions of the bridge behave identically:
+
+   • *Browser -> Emacs*: right-click menu items, popup buttons, keyboard
+     commands, and content-script relay all reach the same Emacs
+     handlers.
+   • *Emacs -> browser*: ‘GET_ALL_TABS’, ‘OPEN_TAB’, ‘FOCUS_TAB’,
+     ‘CLOSE_TAB’, the capture handlers, and the rest of the request
+     catalog work the same way in either browser.
+
+   Each browser identifies itself via ‘CLIENT_HELLO’, and Emacs targets
+a specific one of several connected browsers through the ‘CLIENT’
+argument as described above.
+
+
+File: browsel.info,  Node: What differs,  Next: Customising,  Prev: What works the same in both extensions,  Up: Setup
+
+What differs
+============
+
+   • ‘EVAL_IN_ACTIVE_TAB’ and ‘browsel-js’ source blocks run in the
+     content-script isolated world.  The portable ‘"USER_SCRIPT"’
+     default works on both browsers; passing ‘:world "MAIN"’ is Chrome
+     only and a block that needs MAIN will surface a clear error on
+     Firefox.
+   • Firefox MV2 does not require an "Allow User Scripts" toggle -
+     ‘browser.tabs.executeScript’ runs without separate user opt-in.
+
+
+File: browsel.info,  Node: Customising,  Prev: What differs,  Up: Setup
+
+Customising
+===========
+
+Most things are reachable from the popup -> Options page (or
+‘chrome://extensions’ -> Browsel -> Extension options):
+
+   • *Raise Emacs* - a checkbox per action.  When checked, Emacs is
+     brought to the foreground after that action completes.  Stored in
+     browser storage and overrides the bundled defaults without
+     requiring a rebuild.
+   • *Menus* / *Handlers* - raw JSON editors for additions or changes
+     beyond the bundled defaults.
+
+   Larger changes (new menus, new content scripts, etc.)  are made in
+‘extension/config.json’.  ‘CONTRIBUTING.org’ covers the schema.
+
+
+File: browsel.info,  Node: Security,  Next: Troubleshooting,  Prev: Setup,  Up: Top
+
+Security
+********
+
+Running an unpacked Web browser extension requires the browser's
+developer affordance to be enabled: in Chrome, *Developer mode* in
+‘chrome://extensions’; in Firefox, *Load Temporary Add-on* in
+‘about:debugging’.  This is a browser-level requirement, not a ‘browsel’
+feature.  Without it the extension does not run, no WebSocket is opened,
+and none of the features below are available.
+
+   The security posture of the running extension depends on which
+features you want to use:
+
+* Menu:
+
+* Sending content from the Web browser to Emacs::
+* Querying and controlling tabs from Emacs::
+* Evaluating JavaScript in tabs::
+* Pausing the bridge without uninstalling::
+* The WebSocket itself::
+
+
+File: browsel.info,  Node: Sending content from the Web browser to Emacs,  Next: Querying and controlling tabs from Emacs,  Up: Security
+
+Sending content from the Web browser to Emacs
+=============================================
+
+The right-click menu actions, the popup buttons, and the keyboard
+shortcuts all transfer content from the Web browser to Emacs at your
+explicit initiative: you click or invoke the shortcut, the browser reads
+the URL, selection, or page HTML, and the data is sent over the
+WebSocket on ‘127.0.0.1:9130’ to a registered handler in Emacs.  There
+is nothing to prompt for in this direction - the user is the one
+initiating each transfer.  No additional browser permissions need to be
+enabled beyond the developer affordance described above.
+
+
+File: browsel.info,  Node: Querying and controlling tabs from Emacs,  Next: Evaluating JavaScript in tabs,  Prev: Sending content from the Web browser to Emacs,  Up: Security
+
+Querying and controlling tabs from Emacs
+========================================
+
+The handlers ‘GET_ALL_TABS’, ‘GET_ACTIVE_TAB’, ‘OPEN_TAB’, ‘FOCUS_TAB’,
+and ‘CLOSE_TAB’ let elisp running in Emacs read the tab list, switch
+between tabs, open new ones, and close existing ones.  These calls are
+not prompted: any elisp executing in your Emacs can invoke them.  The
+capability is roughly equivalent to giving Emacs the ability to read its
+own buffer list - appropriate to the trust you already place in your
+editor.  No additional browser permissions are required.
+
+
+File: browsel.info,  Node: Evaluating JavaScript in tabs,  Next: Pausing the bridge without uninstalling,  Prev: Querying and controlling tabs from Emacs,  Up: Security
+
+Evaluating JavaScript in tabs
+=============================
+
+‘EVAL_IN_ACTIVE_TAB’ and the ‘browsel-js’ source blocks run arbitrary
+JavaScript inside a tab, which can read the DOM, cookies,
+‘localStorage’, and any in-page state.  Two protections cover this
+capability:
+
+  1. The Chrome-level toggle *Allow User Scripts* (‘chrome://extensions’
+     -> Browsel -> Details).  When this is off, ‘EVAL_IN_ACTIVE_TAB’
+     fails with a clear error; every other feature continues to work.
+     Leave it off if JavaScript evaluation is not a capability you need.
+
+  2. When *Allow User Scripts* is on, ‘browsel’ still requires per-tab
+     consent before any script runs.  The first ‘EVAL_IN_ACTIVE_TAB’
+     request to a tab displays an in-page overlay showing the code about
+     to run, with four buttons: *Deny*, *Allow once*, *Allow 1 hour*, or
+     *Allow this tab*.  The toolbar icon turns red on tabs with active
+     consent, and the popup lists every consented tab with per-row
+     revocation.
+
+
+File: browsel.info,  Node: Pausing the bridge without uninstalling,  Next: The WebSocket itself,  Prev: Evaluating JavaScript in tabs,  Up: Security
+
+Pausing the bridge without uninstalling
+=======================================
+
+Turn Developer mode off in ‘chrome://extensions’.  The extension stops,
+the WebSocket connection terminates, and Emacs reports "no client
+connected" if it is invoked.
+
+
+File: browsel.info,  Node: The WebSocket itself,  Prev: Pausing the bridge without uninstalling,  Up: Security
+
+The WebSocket itself
+====================
+
+The Emacs side binds the WebSocket server to ‘127.0.0.1’ explicitly, not
+to all interfaces.  The kernel rejects any connection that does not
+originate from the loopback interface, so a process on a different
+machine cannot connect even when reachable on the same LAN.  The browser
+extension is similarly unreachable: extensions do not accept network
+connections at all; they only initiate outbound ones.
+
+   Local processes are a different matter.  The WebSocket has no
+authentication, so any process on the same machine that can connect to
+‘127.0.0.1:9130’ can invoke any handler that Emacs has registered.  The
+trust boundary is the same as for any other local-only daemon you run; a
+process that already has access to your home directory or your Emacs
+server can affect your session in equivalent ways.
+
+   For the deeper threat model and what is _not_ protected, see
+‘CONTRIBUTING.org’.
+
+
+File: browsel.info,  Node: Troubleshooting,  Next: License,  Prev: Security,  Up: Top
+
+Troubleshooting
+***************
+
+Symptom                                 First thing to try
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+Popup shows Disconnected                Click Reconnect.  If still red: reload the browser extension card (Chrome: ‘chrome://extensions’; Firefox: ‘about:debugging’).  If still red: ‘M-x browsel-start’.
+‘EVAL_IN_ACTIVE_TAB’ errors             On Chrome: toggle *Allow User Scripts* on in the extension's Details.  On Firefox MV2: only ‘:world "USER_SCRIPT"’ is supported; ‘:world "MAIN"’ is rejected.
+Consent overlay never appears           ‘chrome://’, ‘chrome-extension://’, and the Web Store refuse eval - Chrome policy.
+"no client connected" from elisp        browser extension isn't connected.  Check the popup; reload if needed.
+‘browsel-start’ says "address in use"   Another process is already on 9130.  ‘lsof -nP -iTCP:9130 -sTCP:LISTEN’ to see which.
+Save-page produces no notification      Check ‘*Messages*’; the handler logs success/failure there.
+
+
+File: browsel.info,  Node: License,  Next: Info manual,  Prev: Troubleshooting,  Up: Top
+
+License
+*******
+
+GPL-3.0-or-later.  The full license text is in ‘LICENSE’.
+
+
+File: browsel.info,  Node: Info manual,  Next: Adding a new action or modifying the protocol,  Prev: License,  Up: Top
+
+Info manual
+***********
+
+The Info version of this README (‘browsel.info’) and its ‘dir’ entry
+live at the package root, following the multi-file ELPA convention.
+‘package.el’ adds the package's directory to ‘Info-directory-list’
+automatically on activation, so ‘C-h i’ lists ‘browsel’ under the
+‘Emacs’ category with no user configuration.
+
+   For installs that bypass ‘package.el’ (raw ‘:load-path’, git
+submodule, straight.el without info handling), point Info at the package
+directory once:
+
+     (with-eval-after-load 'info
+       (info-initialize)
+       (add-to-list 'Info-directory-list
+                    (file-name-directory (locate-library "browsel"))))
+
+   After editing ‘README.org’, regenerate the Info file with ‘make
+info’.  Both ‘browsel.info’ and ‘dir’ are committed source-of-truth
+artifacts and are refreshed together.
+
+
+File: browsel.info,  Node: Adding a new action or modifying the protocol,  Prev: Info manual,  Up: Top
+
+Adding a new action or modifying the protocol
+*********************************************
+
+See ‘CONTRIBUTING.org’.  It covers the full configuration schema, the
+JSON shapes Emacs and the browser exchange, the build pipeline, and how
+to extend either side.
+
+   For non-obvious failure modes not otherwise documented (MV3 setIcon
+behavior, IPv6 localhost, lexical-binding with ‘org-capture-initial’,
+YouTube PoToken gating, etc.)  see ‘ai/gotchas.md’.
+
+
+Tag Table:
+Node: Top237
+Node: Introduction1451
+Node: Quick setup4009
+Node: Features5988
+Node: In the Web browser6173
+Node: In Emacs7092
+Node: Extensibility9547
+Node: Right-click menu actions9825
+Node: Keyboard shortcuts11321
+Node: Per-tab eval consent11933
+Node: The popup12486
+Node: Querying and controlling the browser from Emacs13239
+Node: API Enumerating browsers and their tabs14612
+Node: Quick helpers18841
+Node: Client names and how they persist21692
+Node: Route URLs through browsel24530
+Ref: Rewrite URLs before dispatch27924
+Node: Tab management30347
+Ref: browsel-tab-jump -- completing-read jumper30762
+Ref: browsel-tab-manager -- buffer view32611
+Ref: browsel-tab-manager-close-duplicates35635
+Node: Run JavaScript in any tab from Emacs36184
+Node: browsel-request36485
+Node: Minimal example40327
+Node: browsel-js source blocks41325
+Node: Setup44662
+Node: Requirements44939
+Node: Emacs46929
+Node: Chrome extension51400
+Node: Firefox extension52265
+Node: What works the same in both extensions53287
+Node: What differs54079
+Node: Customising54676
+Node: Security55379
+Node: Sending content from the Web browser to Emacs56185
+Node: Querying and controlling tabs from Emacs56960
+Node: Evaluating JavaScript in tabs57723
+Node: Pausing the bridge without uninstalling58920
+Node: The WebSocket itself59325
+Node: Troubleshooting60386
+Node: License61679
+Node: Info manual61851
+Node: Adding a new action or modifying the protocol62865
+
+End Tag Table
+
+
+Local Variables:
+coding: utf-8
+Info-documentlanguage: en
+End:

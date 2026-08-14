@@ -16,6 +16,8 @@
 #   make check-ci       — same as `make check' but under $(CI_EMACS)
 #                         (defaults to emacs-plus@30, matching the
 #                         GitHub Actions matrix; run before pushing)
+#   make info           — rebuild browsel.info and dir from README.org
+#                         (both are committed artifacts, not cleaned)
 #   make all            — check + extension
 #
 # Override the Emacs binary by passing EMACS=path/to/emacs.
@@ -54,7 +56,7 @@ EMACS_BATCH = $(EMACS) -Q --batch \
   --eval "(add-to-list 'package-archives '(\"melpa\" . \"https://melpa.org/packages/\"))" \
   --eval "(package-initialize)"
 
-.PHONY: default lint checkdoc check-declare compile clean check check-ci extension all
+.PHONY: default lint checkdoc check-declare compile clean check check-ci extension info all
 
 # Default target: byte-compile the elisp and rebuild the WebExtension
 # bundles.  Lint is not included here so the common edit-then-`make' loop
@@ -132,6 +134,31 @@ compile: $(ELPA_DIR)/.installed
 
 clean:
 	rm -f *.elc
+
+# Info manual (multi-file ELPA convention): browsel.info and dir both
+# live at the package root and are committed.  `make clean' does NOT
+# touch them -- they are source-of-truth artifacts consumed by ELPA
+# activation.  Regenerate after editing README.org.
+INFO_FILE = browsel.info
+INFO_DIR  = dir
+
+info: $(INFO_FILE) $(INFO_DIR)
+
+# Stage README.org as browsel.org so Org's basename-derived output
+# filename matches `#+texinfo_filename'.  Without this, Org produces
+# README.texi -> browsel.info (from @setfilename) and then its
+# post-processing looks for README.info and fails.
+$(INFO_FILE): README.org
+	cp README.org browsel.org
+	$(EMACS) -Q --batch \
+	  --eval "(setq load-prefer-newer t)" \
+	  --eval "(require 'ox-texinfo)" \
+	  browsel.org \
+	  -f org-texinfo-export-to-info
+	rm -f browsel.org browsel.texi
+
+$(INFO_DIR): $(INFO_FILE)
+	install-info --info-file=$(INFO_FILE) --dir-file=$(INFO_DIR)
 
 # Delegate to the extension's own Makefile.  Its default target builds
 # both Chrome and Firefox bundles.
