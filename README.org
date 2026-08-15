@@ -1,5 +1,9 @@
 #+title: browsel
 #+author: Daniel M. German
+#+texinfo_filename: browsel.info
+#+texinfo_dir_category: Emacs
+#+texinfo_dir_title: browsel: (browsel).
+#+texinfo_dir_desc: Bidirectional communication with the web browser including a tab manager.
 
 #+attr_org: :width 240
 #+attr_html: :width 240 :align center
@@ -139,6 +143,10 @@ does not, click *Reconnect*.
   browser tab at point.
 - =M-x browsel-selection= -- insert the current text selection
   from the active browser tab at point.
+- =M-x browsel-url= -- insert the URL of the active browser tab
+  at point.
+- =M-x browsel-title= -- insert the title of the active browser
+  tab at point.
 - =M-x browsel-scroll-page= -- scroll the active tab one viewport
   down; numeric prefix scrolls N pages (negative = back); bare =C-u=
   scrolls one page back.
@@ -364,6 +372,8 @@ nothing.
 |-------------------------------+----------------------------------------------+-----------------------------------------|
 | =browsel-org-link=     | inserts =[[URL][TITLE]]= for the active tab at point | the link string                        |
 | =browsel-selection=    | inserts the active tab's selected text at point | the selection (empty string when none) |
+| =browsel-url=          | inserts the active tab's URL at point            | the URL string (nil when the tab has no URL)   |
+| =browsel-title=        | inserts the active tab's title at point          | the title string (nil when the tab has no title) |
 | =browsel-scroll-page=         | scrolls the active tab one viewport (sign-honored numeric prefix; bare =C-u= = back) | nil (the eval response)                |
 | =browsel-video-toggle-play=   | toggles play/pause on the first =<video>= element | interactive only                        |
 | =browsel-video-advance=       | seeks the first =<video>= by 5 seconds (numeric prefix N; bare =C-u= = back) | interactive only                        |

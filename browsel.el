@@ -1665,6 +1665,34 @@ connected."
         (progn (insert text) nil)
       text)))
 
+;;;###autoload
+(defun browsel-url (&optional client)
+  "Insert (or return) the URL of the active browser tab.
+When called interactively, the URL is inserted at point and the
+return value is nil; when called from Lisp the URL string is
+returned, or nil when the tab has no URL.  CLIENT, when non-nil,
+names the connected browsel client; interactively the command
+prompts when more than one client is connected."
+  (interactive (list (browsel--read-client-interactive)))
+  (let ((url (plist-get (browsel--active-tab client) :url)))
+    (if (called-interactively-p 'any)
+        (progn (insert (or url "")) nil)
+      url)))
+
+;;;###autoload
+(defun browsel-title (&optional client)
+  "Insert (or return) the title of the active browser tab.
+When called interactively, the title is inserted at point and the
+return value is nil; when called from Lisp the title string is
+returned, or nil when the tab has no title.  CLIENT, when non-nil,
+names the connected browsel client; interactively the command
+prompts when more than one client is connected."
+  (interactive (list (browsel--read-client-interactive)))
+  (let ((title (plist-get (browsel--active-tab client) :title)))
+    (if (called-interactively-p 'any)
+        (progn (insert (or title "")) nil)
+      title)))
+
 (defun browsel--format-time-hms (total-seconds)
   "Format TOTAL-SECONDS as `H:MM:SS' / `M:SS' / `S'.
 Drops leading zero components — sub-hour timestamps come back as

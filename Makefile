@@ -12,12 +12,15 @@
 #   make extension      — rebuild Chrome + Firefox extension targets
 #                         (delegates to extension/Makefile's default target)
 #   make clean          — remove every *.elc file
-#   make check          — compile + lint + checkdoc + check-declare
+#   make check          — compile + lint + checkdoc + check-declare + info
 #   make check-ci       — same as `make check' but under $(CI_EMACS)
 #                         (defaults to emacs-plus@30, matching the
 #                         GitHub Actions matrix; run before pushing)
 #   make info           — rebuild browsel.info and dir from README.org
-#                         (both are committed artifacts, not cleaned)
+#                         (both are committed artifacts, not cleaned).
+#                         Also runs from `default', `check', and `all',
+#                         gated by README.org's mtime, so a stale info
+#                         cannot slip into a commit.
 #   make all            — check + extension
 #
 # Override the Emacs binary by passing EMACS=path/to/emacs.
@@ -58,10 +61,13 @@ EMACS_BATCH = $(EMACS) -Q --batch \
 
 .PHONY: default lint checkdoc check-declare compile clean check check-ci extension info all
 
-# Default target: byte-compile the elisp and rebuild the WebExtension
-# bundles.  Lint is not included here so the common edit-then-`make' loop
-# stays fast; run `make check' or `make all' before committing.
-default: compile extension
+# Default target: byte-compile the elisp, rebuild the WebExtension
+# bundles, and regenerate the Info manual if README.org changed.
+# Info regeneration is dependency-gated -- if README.org has not been
+# touched since browsel.info was last built, this is a no-op.  Lint is
+# not included here so the common edit-then-`make' loop stays fast;
+# run `make check' or `make all' before committing.
+default: compile extension info
 
 $(ELPA_DIR):
 	@mkdir -p $@
@@ -165,7 +171,7 @@ $(INFO_DIR): $(INFO_FILE)
 extension:
 	$(MAKE) -C extension
 
-check: compile lint checkdoc check-declare
+check: compile lint checkdoc check-declare info
 
 # CI-mirror check: force the same Emacs version the GitHub Actions
 # matrix pins.  The default `make check' runs under whatever `emacs'
