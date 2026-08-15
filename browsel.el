@@ -1148,7 +1148,10 @@ roster."
             ((pump ()
                (cond
                 ((> (float-time) deadline)
-                 (error "Request %s timed out" name))
+                 (if (equal name "EVAL_IN_ACTIVE_TAB")
+                     (user-error "Browsel: request %s timed out (did the per-tab consent overlay appear?  Grant consent and try again)"
+                                 name)
+                   (error "Request %s timed out" name)))
                 (t
                  (accept-process-output nil 0.05)
                  (pump)))))
@@ -1674,9 +1677,21 @@ path (passing CLIENT=nil to a helper) still delegates to
 
 (defun browsel--eval-active (code &optional client)
   "Run CODE in the active tab of CLIENT and return its result value.
-Unwraps the standard `EVAL_IN_ACTIVE_TAB' response shape."
-  (let ((resp (browsel-request "EVAL_IN_ACTIVE_TAB"
-                               (list :code code) client)))
+Unwraps the standard `EVAL_IN_ACTIVE_TAB' response shape.  Signals
+`user-error' when the response status is not \"ok\" -- for example,
+per-tab consent denial or a browser-side timeout -- carrying the
+browser message.  Timeout messages get the consent hint appended
+since consent-related delays are the most common cause."
+  (let* ((resp   (browsel-request "EVAL_IN_ACTIVE_TAB"
+                                  (list :code code) client))
+         (status (plist-get resp :status)))
+    (unless (equal status "ok")
+      (let ((msg (or (plist-get resp :message) "eval request failed")))
+        (user-error "Browsel: %s%s"
+                    msg
+                    (if (equal msg "timeout")
+                        " (did the per-tab consent overlay appear?  Grant consent and try again)"
+                      ""))))
     (plist-get (car (plist-get resp :result)) :result)))
 
 ;;;###autoload
@@ -1709,42 +1724,21 @@ command prompts when more than one client is connected."
 (defun browsel-selection (&optional client)
   "Insert (or return) the active tab's current text selection.
 When called interactively, the selection text is inserted at point
-and the return value is nil; the command signals `user-error' when
-the browser rejects the eval (for example, per-tab consent denial
-or timeout), using the browser's own error message when available.
-An empty selection is not an error -- interactive callers insert
-nothing and programmatic callers get the empty string.  When called
-from Lisp the selection string is returned, the empty string when
-nothing is selected, or nil when the browser returned an error
-status.  Errors raised by `browsel-request' itself (timeout, no
-client) propagate to Lisp callers unchanged.  CLIENT, when non-nil,
-names the connected browsel client; interactively the command
-prompts when more than one client is connected."
+and the return value is nil; an empty selection inserts nothing.
+When called from Lisp the selection string is returned, or the
+empty string when nothing is selected.  Errors from the eval layer
+propagate through `browsel--eval-active' -- per-tab consent denial,
+timeout, or no client -- and their message text already carries the
+consent hint.  CLIENT, when non-nil, names the connected browsel
+client; interactively the command prompts when more than one client
+is connected."
   (interactive (list (browsel--read-client-interactive)))
-  (let* ((interactive-p (called-interactively-p 'any))
-         (resp (condition-case err
-                   (browsel-request "EVAL_IN_ACTIVE_TAB"
-                                    '(:code "window.getSelection().toString()")
-                                    client)
-                 (error
-                  (if interactive-p
-                      (user-error "Browsel: %s (did the per-tab consent overlay appear?  Grant consent and try again)"
-                                  (error-message-string err))
-                    (signal (car err) (cdr err))))))
-         (status (plist-get resp :status)))
-    (cond
-     ((not (equal status "ok"))
-      (if interactive-p
-          (user-error "Browsel: %s"
-                      (or (plist-get resp :message)
-                          "selection request failed"))
-        nil))
-     (t
-      (let ((text (or (plist-get (car (plist-get resp :result)) :result)
-                      "")))
-        (if interactive-p
-            (progn (insert text) nil)
-          text))))))
+  (let ((text (or (browsel--eval-active
+                   "window.getSelection().toString()" client)
+                  "")))
+    (if (called-interactively-p 'any)
+        (progn (insert text) nil)
+      text)))
 
 ;;;###autoload
 (defun browsel-url (&optional client)

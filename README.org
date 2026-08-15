@@ -371,7 +371,7 @@ nothing.
 | Command                       | Interactive use                              | Lisp return value                       |
 |-------------------------------+----------------------------------------------+-----------------------------------------|
 | =browsel-org-link=     | inserts =[[URL][TITLE]]= for the active tab at point (=user-error= when the tab has no URL) | the link string, or nil when the tab has no URL |
-| =browsel-selection=    | inserts the active tab's selected text at point (=user-error= when the browser rejects the eval, e.g. consent denial) | the selection ("" when nothing is selected; nil when the browser returned an error status) |
+| =browsel-selection=    | inserts the active tab's selected text at point (empty inserts nothing; =user-error= from the eval layer on timeout or consent denial) | the selection ("" when nothing is selected); errors from the eval layer propagate |
 | =browsel-url=          | inserts the active tab's URL at point (=user-error= when the tab has no URL)     | the URL string (nil when the tab has no URL)   |
 | =browsel-title=        | inserts the active tab's title at point (=user-error= when the tab has no title) | the title string (nil when the tab has no title) |
 | =browsel-scroll-page=         | scrolls the active tab one viewport (sign-honored numeric prefix; bare =C-u= = back) | nil (the eval response)                |
