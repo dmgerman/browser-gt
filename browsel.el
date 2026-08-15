@@ -162,6 +162,21 @@ browser by passing an explicit CLIENT to the helpers."
 (defvar browsel-request-timeout 10
   "Seconds to wait for a response to an Emacs-initiated request before timing out.")
 
+(defvar browsel-eval-request-timeout 30
+  "Seconds to wait for `EVAL_IN_ACTIVE_TAB' before timing out.
+Overrides `browsel-request-timeout' for eval requests only.  Set
+to match the browser-side consent auto-deny (30 s in
+`extension/src/consent.js') so the elisp side does not give up
+before the user has a chance to respond to the consent overlay.")
+
+(defvar browsel-eval-consent-hint-delay 1.5
+  "Seconds to wait before hinting that the consent overlay may need action.
+When an `EVAL_IN_ACTIVE_TAB' request has not returned within this
+many seconds, `browsel-request-async' emits a message reminding the
+user that the in-page consent overlay may be waiting for a click.
+The hint is cancelled the moment the response arrives, so requests
+against tabs that already have consent never trigger it.")
+
 (defvar browsel-debug nil
   "When non-nil, log every WebSocket frame to *browsel* buffer.")
 
@@ -1022,12 +1037,42 @@ another live ws."
            (browsel--warn "cancellation callback for %s signalled: %s"
                                 id (error-message-string err))))))))
 
+(defun browsel--effective-timeout (name)
+  "Return the request timeout to use for a request named NAME.
+`EVAL_IN_ACTIVE_TAB' uses `browsel-eval-request-timeout' so the
+elisp side can outlast the browser-side consent overlay auto-deny;
+every other request uses `browsel-request-timeout'."
+  (if (equal name "EVAL_IN_ACTIVE_TAB")
+      browsel-eval-request-timeout
+    browsel-request-timeout))
+
+(defun browsel--schedule-consent-hint (name)
+  "Return a timer that hints about the consent overlay, or nil.
+When NAME is `EVAL_IN_ACTIVE_TAB', schedule a message after
+`browsel-eval-consent-hint-delay' seconds reminding the user that
+the in-page consent overlay may be waiting.  Callers must cancel
+the returned timer when the request completes so the hint does not
+fire spuriously after a quick reply."
+  (when (equal name "EVAL_IN_ACTIVE_TAB")
+    (run-at-time
+     browsel-eval-consent-hint-delay nil
+     (lambda ()
+       (message
+        "Browsel: waiting on the browser -- if a per-tab consent overlay appeared, grant it to continue")))))
+
 (defun browsel-request-async (name payload callback &optional client)
   "Send a request NAME with PAYLOAD to the browser; invoke CALLBACK on response.
 CALLBACK receives the decoded response payload (a plist).  If the
-request times out (`browsel-request-timeout' seconds) CALLBACK is
-called with (:status \"error\" :message \"timeout\").  Returns the
-request id, or nil if no client is connected.
+request times out CALLBACK is called with (:status \"error\"
+:message \"timeout\").  Returns the request id, or nil if no client
+is connected.
+
+The timeout is `browsel-request-timeout' by default; requests named
+`EVAL_IN_ACTIVE_TAB' use the larger `browsel-eval-request-timeout'
+so the elisp side outlasts the browser-side consent overlay
+auto-deny.  For eval requests, a `browsel-eval-consent-hint-delay'
+timer also fires a reminder message about the consent overlay
+unless the response arrives first.
 
 CLIENT, if non-nil, names which connected client to target (e.g.
 \"chrome\", \"firefox\").  When omitted, the request is sent to the
@@ -1035,11 +1080,16 @@ sole connected client; when more than one is connected, CALLBACK is
 invoked with a status:error payload and nil is returned."
   (pcase (browsel--target-for client name)
     (`(ok . ,ws)
-     (let* ((id    (org-id-uuid))
-            (timer (run-at-time browsel-request-timeout nil
-                                #'browsel--timeout-request id)))
+     (let* ((id         (org-id-uuid))
+            (hint-timer (browsel--schedule-consent-hint name))
+            (wrapped    (lambda (response)
+                          (when (timerp hint-timer)
+                            (cancel-timer hint-timer))
+                          (funcall callback response)))
+            (timer      (run-at-time (browsel--effective-timeout name) nil
+                                     #'browsel--timeout-request id)))
        (setq browsel--pending-callbacks
-             (cons (cons id (cons callback timer))
+             (cons (cons id (cons wrapped timer))
                    browsel--pending-callbacks))
        (browsel--send-to ws
                                `((id      . ,id)
@@ -1093,7 +1143,7 @@ roster."
         ;; status:error payload, so escalate to an error here too.
         (error "Browsel-request: no acceptable target for %s" name))
       (let ((deadline (+ (float-time)
-                         (+ 0.5 browsel-request-timeout))))
+                         (+ 0.5 (browsel--effective-timeout name)))))
         (cl-labels
             ((pump ()
                (cond
@@ -1633,64 +1683,103 @@ Unwraps the standard `EVAL_IN_ACTIVE_TAB' response shape."
 (defun browsel-org-link (&optional client)
   "Insert (or return) an Org link to the active browser tab.
 The link is `[[URL][TITLE]]' built via `browsel--make-link', so
-unsafe schemes (elisp:, javascript:, …) fall back to a plain-text
+unsafe schemes (elisp:, javascript:, ...) fall back to a plain-text
 rendering.  When called interactively the link is inserted at point
-and the return value is nil; when called from Lisp the link string
-is returned.  CLIENT, when non-nil, names the connected browsel
-client; interactively the command prompts when more than one client
-is connected."
+and the return value is nil; interactive callers signal `user-error'
+when the active tab has no URL.  When called from Lisp the link
+string is returned, or nil when the tab has no URL.  CLIENT, when
+non-nil, names the connected browsel client; interactively the
+command prompts when more than one client is connected."
   (interactive (list (browsel--read-client-interactive)))
-  (let* ((tab   (browsel--active-tab client))
-         (url   (plist-get tab :url))
-         (title (or (plist-get tab :title) url))
-         (link  (browsel--make-link url title)))
-    (if (called-interactively-p 'any)
-        (progn (insert link) nil)
-      link)))
+  (let* ((tab (browsel--active-tab client))
+         (url (plist-get tab :url)))
+    (cond
+     ((null url)
+      (if (called-interactively-p 'any)
+          (user-error "Browsel: active tab has no URL")
+        nil))
+     (t
+      (let* ((title (or (plist-get tab :title) url))
+             (link  (browsel--make-link url title)))
+        (if (called-interactively-p 'any)
+            (progn (insert link) nil)
+          link))))))
 
 ;;;###autoload
 (defun browsel-selection (&optional client)
   "Insert (or return) the active tab's current text selection.
 When called interactively, the selection text is inserted at point
-and the return value is nil; when called from Lisp the selection
-string is returned (empty string when nothing is selected).
-CLIENT, when non-nil, names the connected browsel client;
-interactively the command prompts when more than one client is
-connected."
+and the return value is nil; the command signals `user-error' when
+the browser rejects the eval (for example, per-tab consent denial
+or timeout), using the browser's own error message when available.
+An empty selection is not an error -- interactive callers insert
+nothing and programmatic callers get the empty string.  When called
+from Lisp the selection string is returned, the empty string when
+nothing is selected, or nil when the browser returned an error
+status.  Errors raised by `browsel-request' itself (timeout, no
+client) propagate to Lisp callers unchanged.  CLIENT, when non-nil,
+names the connected browsel client; interactively the command
+prompts when more than one client is connected."
   (interactive (list (browsel--read-client-interactive)))
-  (let* ((raw  (browsel--eval-active
-                "window.getSelection().toString()" client))
-         (text (or raw "")))
-    (if (called-interactively-p 'any)
-        (progn (insert text) nil)
-      text)))
+  (let* ((interactive-p (called-interactively-p 'any))
+         (resp (condition-case err
+                   (browsel-request "EVAL_IN_ACTIVE_TAB"
+                                    '(:code "window.getSelection().toString()")
+                                    client)
+                 (error
+                  (if interactive-p
+                      (user-error "Browsel: %s (did the per-tab consent overlay appear?  Grant consent and try again)"
+                                  (error-message-string err))
+                    (signal (car err) (cdr err))))))
+         (status (plist-get resp :status)))
+    (cond
+     ((not (equal status "ok"))
+      (if interactive-p
+          (user-error "Browsel: %s"
+                      (or (plist-get resp :message)
+                          "selection request failed"))
+        nil))
+     (t
+      (let ((text (or (plist-get (car (plist-get resp :result)) :result)
+                      "")))
+        (if interactive-p
+            (progn (insert text) nil)
+          text))))))
 
 ;;;###autoload
 (defun browsel-url (&optional client)
   "Insert (or return) the URL of the active browser tab.
 When called interactively, the URL is inserted at point and the
-return value is nil; when called from Lisp the URL string is
-returned, or nil when the tab has no URL.  CLIENT, when non-nil,
+return value is nil; interactive callers signal `user-error' when
+the active tab has no URL.  When called from Lisp the URL string
+is returned, or nil when the tab has no URL.  CLIENT, when non-nil,
 names the connected browsel client; interactively the command
 prompts when more than one client is connected."
   (interactive (list (browsel--read-client-interactive)))
   (let ((url (plist-get (browsel--active-tab client) :url)))
     (if (called-interactively-p 'any)
-        (progn (insert (or url "")) nil)
+        (progn
+          (unless url (user-error "Browsel: active tab has no URL"))
+          (insert url)
+          nil)
       url)))
 
 ;;;###autoload
 (defun browsel-title (&optional client)
   "Insert (or return) the title of the active browser tab.
 When called interactively, the title is inserted at point and the
-return value is nil; when called from Lisp the title string is
-returned, or nil when the tab has no title.  CLIENT, when non-nil,
-names the connected browsel client; interactively the command
-prompts when more than one client is connected."
+return value is nil; interactive callers signal `user-error' when
+the active tab has no title.  When called from Lisp the title
+string is returned, or nil when the tab has no title.  CLIENT,
+when non-nil, names the connected browsel client; interactively
+the command prompts when more than one client is connected."
   (interactive (list (browsel--read-client-interactive)))
   (let ((title (plist-get (browsel--active-tab client) :title)))
     (if (called-interactively-p 'any)
-        (progn (insert (or title "")) nil)
+        (progn
+          (unless title (user-error "Browsel: active tab has no title"))
+          (insert title)
+          nil)
       title)))
 
 (defun browsel--format-time-hms (total-seconds)
