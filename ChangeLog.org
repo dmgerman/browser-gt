@@ -6,7 +6,9 @@
 - Replace browsel-tab-manager with browel-tab-jump
 - Add browsel-tab-manager as a dired style buffer where you can
   delete, bookmark or jump to open tabs.
-- Do not fail if port for server already in use (warn instead)
+- Do not fail if port for server already in use (warn instead).
+- Added info file.  
+- add functions browsel-url and browsel-title to retrieve url and title.
 
 * 0.94 
 
