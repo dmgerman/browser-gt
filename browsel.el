@@ -177,6 +177,25 @@ user that the in-page consent overlay may be waiting for a click.
 The hint is cancelled the moment the response arrives, so requests
 against tabs that already have consent never trigger it.")
 
+(defvar browsel-client-connected-functions nil
+  "Abnormal hook run when a browser client completes CLIENT_HELLO.
+Each function is called with one argument: the client's final
+display name (a string, as returned by `browsel-connected-clients').
+The client is already in `browsel--clients' by the time the hook
+fires, so `browsel-browser-tabs' and the other client-name-based
+APIs will find it.  Use this hook to trigger post-connect setup:
+refresh a cached tab list, notify the user, open the tab manager,
+etc.")
+
+(defvar browsel-client-disconnected-functions nil
+  "Abnormal hook run when a browser client's WebSocket closes.
+Each function is called with one argument: the client's display
+name (a string).  The client has already been removed from
+`browsel--clients' by the time the hook fires, so
+`browsel-connected-clients' will not include the name.  If a socket
+closes before CLIENT_HELLO ever completed the client had no
+assigned name and the hook is not run.")
+
 (defvar browsel-debug nil
   "When non-nil, log every WebSocket frame to *browsel* buffer.")
 
@@ -487,7 +506,10 @@ replace the placeholder with a stable identifier."
           (cl-remove-if (lambda (c) (eq (car c) ws)) browsel--rx-buffers))
     (browsel--log "[DISCONNECT] %s (clients=%d)"
                         (if cell (car cell) "?")
-                        (length browsel--clients))))
+                        (length browsel--clients))
+    (when cell
+      (run-hook-with-args 'browsel-client-disconnected-functions
+                          (car cell)))))
 
 (defun browsel--on-error (_ws sym err)
   "Surface WebSocket error ERR in callback SYM."
@@ -996,6 +1018,7 @@ rebuild and reload both sides"
                             (substring instance 0
                                        browsel--instance-suffix-length)
                             (length browsel--clients))
+        (run-hook-with-args 'browsel-client-connected-functions final-name)
         `((status . "ok")
           (client . ,final-name))))))
 

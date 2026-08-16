@@ -990,6 +990,8 @@ Configuration variables for paths, output locations, and credentials
 | =browsel-default-client=          | default browser client for every browsel command |
 | =browsel-url-routes=              | per-pattern URL routing for =browsel-browse-url= |
 | =browsel-browse-url-preprocess-functions= | abnormal hook of URL-rewriting functions run before routing |
+| =browsel-client-connected-functions=    | abnormal hook run with the client name after a CLIENT_HELLO is fully registered |
+| =browsel-client-disconnected-functions= | abnormal hook run with the client name after its WebSocket closes |
 | =browsel-clients-needing-activation= | client names whose macOS app needs an explicit foreground nudge after focus (default =("firefox")=) |
 | =browsel-client-app-names=        | fallback macOS application names per client when the PID-based activation can't find the process |
 | =browsel-tab-manager-sort=        | initial sort key for both tab commands (default =mru=; cycle with =C-t= in jump, =s= in manager) |
