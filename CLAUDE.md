@@ -18,7 +18,12 @@ anything substantive.
   the wire protocol and the old extension; if either ever needs an
   update, ask first.
 - **Edit only `extension/`, never `extension/build/`.**  The build dir
-  is gitignored and regenerated from sources by `make`.
+  is regenerated from sources by `make`, but it IS tracked in git so
+  users can load the extension without running the toolchain.  After
+  any change under `extension/` (src, html, icons, config.json, or
+  targets/<name>/), run `cd extension && make` and stage the resulting
+  diff under `extension/build/` alongside the source change — CI
+  (`.github/workflows/extension-consistency.yml`) fails otherwise.
 
 ## Source map
 
@@ -35,7 +40,7 @@ anything substantive.
 | `extension/targets/<name>/`       | Per-target overlay tree.  `chrome/` (Manifest V3) has background.js, offscreen.js, eval-impl.js, executor.js.  `firefox/` (Manifest V2) has its own background.js, eval-impl.js, executor.js. |
 | `extension/scripts/`              | `build-manifest.py` (takes `--target`), `make-red-icons.py`  |
 | `extension/Makefile`              | `make` (= `make all`) / `make chrome` / `make firefox` / `make package` / `make lint` |
-| `extension/build/<target>/`       | Generated per-target loadable directory. Gitignored.         |
+| `extension/build/<target>/`       | Generated per-target loadable directory. Tracked in git; regenerate with `make` and commit alongside source changes. |
 
 ## Build / verify cycle
 

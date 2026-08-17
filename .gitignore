@@ -3,4 +3,3 @@ spookfox
 *.elc
 .elpa/
 .claude
-extension/build/

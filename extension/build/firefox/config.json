@@ -1,0 +1,244 @@
+{
+  "extension": {
+    "name": "browser-gt (Emacs bridge)",
+    "version": "0.94",
+    "description": "Bidirectional WebSocket bridge between a WebExtension (Chrome or Firefox) and a running Emacs instance.",
+
+    "options_ui": {
+      "page": "html/options.html",
+      "open_in_tab": true
+    },
+
+    "icons": {
+      "16":  "icons/icon16.png",
+      "48":  "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+
+  "extensionTargets": {
+    "chrome": {
+      "manifest_version": 3,
+      "permissions": [
+        "activeTab",
+        "contextMenus",
+        "notifications",
+        "offscreen",
+        "scripting",
+        "storage",
+        "tabs",
+        "userScripts"
+      ],
+      "host_permissions": [
+        "ws://127.0.0.1:9130/*",
+        "http://127.0.0.1:9130/*",
+        "https://*/*",
+        "http://*/*"
+      ],
+      "background": {
+        "service_worker": "src/background.js",
+        "type": "module"
+      },
+      "action": {
+        "default_popup": "html/popup.html",
+        "default_title": "browser-gt",
+        "default_icon": {
+          "16":  "icons/icon16.png",
+          "48":  "icons/icon48.png",
+          "128": "icons/icon128.png"
+        }
+      }
+    },
+    "firefox": {
+      "manifest_version": 2,
+      "permissions": [
+        "activeTab",
+        "contextMenus",
+        "notifications",
+        "storage",
+        "tabs",
+        "<all_urls>"
+      ],
+      "background": {
+        "scripts": ["src/background.js"],
+        "type": "module",
+        "persistent": true
+      },
+      "browser_action": {
+        "default_popup": "html/popup.html",
+        "default_title": "browser-gt",
+        "default_icon": {
+          "16":  "icons/icon16.png",
+          "48":  "icons/icon48.png",
+          "128": "icons/icon128.png"
+        }
+      },
+      "browser_specific_settings": {
+        "gecko": {
+          "id": "browser-gt@dmgerman",
+          "strict_min_version": "115.0"
+        }
+      }
+    }
+  },
+
+  "menus": [
+    {
+      "id":       "__org-capture",
+      "title":    "Emacs: org-capture from selection",
+      "trigger":  "selection",
+      "request":  "ORG_CAPTURE",
+      "payload":  "selection-text",
+      "baseline": true,
+      "raise":    true,
+      "command":  {
+        "name":          "org-capture",
+        "description":   "Org-capture from current page/selection",
+        "suggested_key": { "default": "Ctrl+Shift+C", "mac": "MacCtrl+Shift+C" }
+      }
+    },
+    {
+      "id":       "__org-roam-capture",
+      "title":    "Emacs: org-roam-capture from selection",
+      "trigger":  "selection",
+      "request":  "ORG_ROAM_CAPTURE",
+      "payload":  "selection-text",
+      "baseline": true,
+      "raise":    true,
+      "command":  {
+        "name":          "org-roam-capture",
+        "description":   "Org-roam-capture from current page/selection",
+        "suggested_key": { "default": "Ctrl+Shift+R", "mac": "MacCtrl+Shift+R" }
+      }
+    },
+    {
+      "id":       "__org-capture-link",
+      "title":    "Emacs: org-capture this link",
+      "trigger":  "link",
+      "request":  "ORG_CAPTURE",
+      "payload":  "link-url",
+      "baseline": true,
+      "raise":    true,
+      "command":  {
+        "name":        "org-capture-link",
+        "description": "Org-capture the right-clicked link"
+      }
+    },
+    {
+      "id":       "__org-roam-capture-link",
+      "title":    "Emacs: org-roam-capture this link",
+      "trigger":  "link",
+      "request":  "ORG_ROAM_CAPTURE",
+      "payload":  "link-url",
+      "baseline": true,
+      "raise":    true,
+      "command":  {
+        "name":        "org-roam-capture-link",
+        "description": "Org-roam-capture the right-clicked link"
+      }
+    },
+    {
+      "id":      "eww-page",
+      "title":   "Emacs: open in eww",
+      "trigger": ["page", "link"],
+      "request": "EWW",
+      "payload": "url",
+      "raise":   true,
+      "command": {
+        "name":          "eww",
+        "description":   "Open current page in eww",
+        "suggested_key": { "default": "Ctrl+Shift+W", "mac": "MacCtrl+Shift+W" }
+      }
+    },
+    {
+      "id":      "save-page",
+      "title":   "Emacs: save page",
+      "trigger": "page",
+      "request": "SAVE_PAGE",
+      "payload": "page-html",
+      "raise":   false,
+      "command": {
+        "name":        "save-page",
+        "description": "Save current page (assign a key at chrome://extensions/shortcuts)"
+      }
+    },
+    {
+      "id":      "save-chatgpt",
+      "title":   "Emacs: save ChatGPT conversation",
+      "trigger": "page",
+      "request": "CHATGPT",
+      "payload": { "kind": "tab-message", "method": "extract-conversation" },
+      "raise":   false,
+      "documentUrlPatterns": ["https://chatgpt.com/*"],
+      "command": {
+        "name":          "save-chatgpt",
+        "description":   "Save current ChatGPT conversation",
+        "suggested_key": { "default": "Ctrl+Shift+G", "mac": "MacCtrl+Shift+G" }
+      }
+    },
+    {
+      "id":      "youtube",
+      "title":   "Emacs: add video for later",
+      "trigger": ["page", "link"],
+      "request": "YOUTUBE",
+      "payload": "url-only",
+      "raise":   false,
+      "documentUrlPatterns": [
+        "https://www.youtube.com/*",
+        "https://youtu.be/*"
+      ],
+      "targetUrlPatterns": [
+        "https://www.youtube.com/*",
+        "https://youtu.be/*"
+      ],
+      "command": {
+        "name":        "youtube",
+        "description": "Capture YouTube video for later (assign a key at chrome://extensions/shortcuts)"
+      }
+    },
+    {
+      "id":      "youtube-transcript",
+      "title":   "Emacs: save YouTube transcript",
+      "trigger": ["page", "link"],
+      "request": "YOUTUBE_TRANSCRIPT",
+      "payload": "url-only",
+      "raise":   false,
+      "documentUrlPatterns": [
+        "https://www.youtube.com/*",
+        "https://youtu.be/*"
+      ],
+      "targetUrlPatterns": [
+        "https://www.youtube.com/*",
+        "https://youtu.be/*"
+      ],
+      "command": {
+        "name":        "youtube-transcript",
+        "description": "Save YouTube transcript (assign a key at chrome://extensions/shortcuts)"
+      }
+    }
+  ],
+
+  "handlers": [
+    { "name": "GET_ALL_TABS",       "args-shape": "tabs-query-mru-safe" },
+    { "name": "GET_ACTIVE_TAB",     "api": "chrome.tabs.query",  "args": { "active": true, "currentWindow": true } },
+    { "name": "OPEN_TAB",           "api": "chrome.tabs.create", "args-shape": "open-tab-focused" },
+    { "name": "OPEN_INCOGNITO_TAB", "api": "chrome.tabs.create", "args-shape": "open-incognito-tab" },
+    { "name": "FOCUS_TAB",          "api": "chrome.tabs.update", "args-shape": "focus-tab" },
+    { "name": "CLOSE_TAB",          "api": "chrome.tabs.remove", "args-shape": "tab-id" },
+    { "name": "EVAL_IN_ACTIVE_TAB", "api": "chrome.userScripts.execute", "args-shape": "user-script" }
+  ],
+
+  "contentScripts": [
+    {
+      "matches":    ["<all_urls>"],
+      "js":         ["src/content.js"],
+      "run_at":     "document_idle",
+      "all_frames": false
+    },
+    {
+      "matches": ["https://chatgpt.com/*"],
+      "js":      ["src/content-chatgpt.js"],
+      "run_at":  "document_idle"
+    }
+  ]
+}
