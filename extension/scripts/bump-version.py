@@ -3,12 +3,12 @@
 # Copyright (C) 2026 Daniel M. German <dmg@turingmachine.org>
 # Assisted-by: Claude:claude-opus-4-7
 #
-# Bump the browsel version in browsel.el and config.json in lockstep.
+# Bump the browser-gt version in browser-gt.el and config.json in lockstep.
 #
 # Three places must move together:
-#   1. `(defconst browsel-version "...")' in browsel.el  — the wire
+#   1. `(defconst browser-gt-version "...")' in browser-gt.el  — the wire
 #      version enforced by CLIENT_HELLO's strict equality check.
-#   2. `;; Version: ...' in browsel.el's file header      — what MELPA
+#   2. `;; Version: ...' in browser-gt.el's file header      — what MELPA
 #      and package.el read to name the installed package version.
 #   3. `"version": "..."' in extension/config.json        — copied
 #      into every built manifest.json and sent in CLIENT_HELLO.
@@ -36,19 +36,19 @@ def main():
     extension_dir = pathlib.Path(__file__).resolve().parent.parent
     repo_root = extension_dir.parent
     cfg_path = extension_dir / "config.json"
-    el_path = repo_root / "browsel.el"
+    el_path = repo_root / "browser-gt.el"
 
     # Regex-substitute each file in place so unrelated formatting
     # (array layout in config.json, blank lines and comments in
-    # browsel.el) is preserved verbatim.  Each entry names the file
-    # and the pattern; browsel.el has TWO patterns (the file header
-    # and the `browsel-version' defconst) — a match count > 1 means
+    # browser-gt.el) is preserved verbatim.  Each entry names the file
+    # and the pattern; browser-gt.el has TWO patterns (the file header
+    # and the `browser-gt-version' defconst) — a match count > 1 means
     # they must both hit, so a single-shot bump keeps them in sync.
     changed = []
     for path, patterns in [
         (el_path, [
             re.compile(r'(^;; Version: )[^\s]+', re.MULTILINE),
-            re.compile(r'(\(defconst browsel-version ")[^"]*(")'),
+            re.compile(r'(\(defconst browser-gt-version ")[^"]*(")'),
         ]),
         (cfg_path, [
             re.compile(r'("version":\s*")[^"]*(")'),

@@ -1,4 +1,4 @@
-;;; browsel-url-handler.el --- URL routing through browsel  -*- lexical-binding: t; -*-
+;;; browser-gt-url-handler.el --- URL routing through browser-gt  -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 Daniel M. German <dmg@turingmachine.org>
 
@@ -6,7 +6,7 @@
 ;; Assisted-by: Claude:claude-opus-4-7
 ;; Maintainer: Daniel M. German <dmg@turingmachine.org>
 ;; Keywords: comm, tools, browser
-;; URL: https://github.com/dmgerman/browsel
+;; URL: https://github.com/dmgerman/browser-gt
 
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 ;;
@@ -25,21 +25,21 @@
 
 ;;; Commentary:
 
-;; Optional browsel module that routes URLs from Emacs to a connected
-;; browser via the WebSocket bridge.  Drop-in `browsel-browse-url' is
+;; Optional browser-gt module that routes URLs from Emacs to a connected
+;; browser via the WebSocket bridge.  Drop-in `browser-gt-browse-url' is
 ;; compatible with `browse-url-browser-function', so any Emacs command
 ;; that opens a URL (org links, eww, mu4e, Dired, …) can be made to go
-;; through browsel.
+;; through browser-gt.
 ;;
-;; Routing is configured in `browsel-url-routes' as an ordered list of
+;; Routing is configured in `browser-gt-url-routes' as an ordered list of
 ;; plists: each entry maps a URL pattern to a client, an
 ;; incognito flag, and an optional separate match used to detect when
 ;; the URL is "already open" in some tab.  First match in the list
 ;; wins; URLs that match nothing fall through to
-;; `browsel-default-client', non-incognito.
+;; `browser-gt-default-client', non-incognito.
 ;;
 ;; A route's `:client' may be the string \"eww\" (or
-;; `browsel-default-client' itself may be \"eww\") to render the URL
+;; `browser-gt-default-client' itself may be \"eww\") to render the URL
 ;; inside Emacs with eww instead of dispatching to a connected
 ;; browser.  No WS bridge call is made in that case; buffer reuse is
 ;; left to `eww-reuse-buffers'.
@@ -51,7 +51,7 @@
 ;;
 ;; Example configuration:
 ;;
-;;   (setq browsel-url-routes
+;;   (setq browser-gt-url-routes
 ;;         '((:pattern "\\`https?://\\(www\\.\\)?github\\.com/"
 ;;            :client  "chrome")
 ;;           (:pattern "\\`https?://app\\.slack\\.com/"
@@ -61,17 +61,17 @@
 ;;            :client  "firefox"
 ;;            :incognito t)))
 ;;
-;;   ;; Route every URL Emacs opens through browsel:
-;;   (setq browse-url-browser-function #'browsel-browse-url)
+;;   ;; Route every URL Emacs opens through browser-gt:
+;;   (setq browse-url-browser-function #'browser-gt-browse-url)
 ;;
 ;; Incognito caveat: opening an incognito tab requires the user to
-;; toggle "Allow in incognito" for the browsel extension in
+;; toggle "Allow in incognito" for the browser-gt extension in
 ;; `chrome://extensions' (or the Firefox equivalent).  When the toggle
 ;; is off the extension cannot enumerate or create incognito windows;
-;; `browsel-browse-url' detects the failure, warns, and falls back to
+;; `browser-gt-browse-url' detects the failure, warns, and falls back to
 ;; a normal (non-incognito) tab so the user still reaches the page.
 ;;
-;; URL preprocessing: `browsel-browse-url-preprocess-functions' is an
+;; URL preprocessing: `browser-gt-browse-url-preprocess-functions' is an
 ;; abnormal hook of URL-rewriting functions run before routing.  Each
 ;; function receives a URL string and returns a (possibly rewritten)
 ;; URL string; functions apply in list order and the output of one
@@ -81,7 +81,7 @@
 
 ;;; Code:
 
-(require 'browsel)
+(require 'browser-gt)
 (require 'cl-lib)
 (require 'subr-x)
 (require 'seq)
@@ -89,8 +89,8 @@
 
 ;; ── Configuration ──────────────────────────────────────────────────────────
 
-(defcustom browsel-url-routes nil
-  "Ordered list of URL routing rules for `browsel-browse-url'.
+(defcustom browser-gt-url-routes nil
+  "Ordered list of URL routing rules for `browser-gt-browse-url'.
 
 Each element is a plist with these keys:
 
@@ -108,7 +108,7 @@ Each element is a plist with these keys:
     The first matching entry in the list wins.
 
   :client CLIENT-NAME
-    String — the browsel client to address (e.g. \"chrome\" or
+    String — the browser-gt client to address (e.g. \"chrome\" or
     \"firefox\").  Must name a currently-connected client.
     May also be the string \"eww\", in which case the URL is opened
     in Emacs with `eww' and the WS bridge is not used.  When
@@ -118,9 +118,9 @@ Each element is a plist with these keys:
   :incognito BOOL
     Optional.  When non-nil, the tab is opened in an incognito /
     private window.  Requires the user to have toggled \"Allow in
-    incognito\" on the browsel extension; without that toggle the
+    incognito\" on the browser-gt extension; without that toggle the
     extension cannot create or even enumerate incognito windows,
-    `browsel-browse-url' detects the failure, warns once, and
+    `browser-gt-browse-url' detects the failure, warns once, and
     falls back to a normal tab.
 
   :tab-match REGEX
@@ -131,17 +131,17 @@ Each element is a plist with these keys:
     independent of `:pattern' — routing (which client) and tab
     matching (which open tab) are separate concerns.
 
-URLs that match no entry fall through to `browsel-default-client',
+URLs that match no entry fall through to `browser-gt-default-client',
 non-incognito, with identical-URL match."
   :type '(repeat plist)
-  :group 'browsel)
+  :group 'browser-gt)
 
-(defcustom browsel-browse-url-preprocess-functions nil
+(defcustom browser-gt-browse-url-preprocess-functions nil
   "Abnormal hook of URL-rewriting functions run before routing.
 Each function receives a URL string and must return a URL string.
 Functions are applied in list order and the output of one is fed
-into the next.  The rewritten URL is what `browsel-browse-url'
-matches against `browsel-url-routes' and passes to the browser (or
+into the next.  The rewritten URL is what `browser-gt-browse-url'
+matches against `browser-gt-url-routes' and passes to the browser (or
 eww).
 
 Intended for lossless URL rewriting — un-wrapping tracker links,
@@ -149,11 +149,11 @@ canonicalizing amp-URLs, and the like.  Functions must be pure
 \(URL string in, URL string out) and must return the input
 unchanged when they do not apply."
   :type 'hook
-  :group 'browsel)
+  :group 'browser-gt)
 
 ;; ── Matching helpers ───────────────────────────────────────────────────────
 
-(defun browsel-url-handler--domain (url)
+(defun browser-gt-url-handler--domain (url)
   "Return the host of URL with a leading `www.' stripped, or nil.
 Used by the no-route fallback to find an already-open tab whose URL
 contains the same domain — e.g. opening `https://amazon.ca/' will
@@ -165,7 +165,7 @@ reuse a tab already on `https://www.amazon.ca/dp/B1234'."
          (not (string-empty-p host))
          (replace-regexp-in-string "\\`www\\." "" host))))
 
-(defun browsel-url-handler--bare-domain-p (url)
+(defun browser-gt-url-handler--bare-domain-p (url)
   "Return non-nil when URL is a bare domain (no path beyond `/').
 Used to scope the no-route domain-substring fallback to URLs that
 explicitly target a site's root.  A URL with a real path (e.g.
@@ -179,16 +179,16 @@ same domain happens to be the most-recently-accessed."
         (string-empty-p path)
         (string= path "/"))))
 
-(defun browsel-url-handler--match-route (url)
-  "Return the first entry in `browsel-url-routes' whose :pattern matches URL.
+(defun browser-gt-url-handler--match-route (url)
+  "Return the first entry in `browser-gt-url-routes' whose :pattern matches URL.
 Returns nil if no entry matches."
   (seq-find (lambda (route)
               (let ((pat (plist-get route :pattern)))
                 (and (stringp pat)
                      (string-match-p pat url))))
-            browsel-url-routes))
+            browser-gt-url-routes))
 
-(defun browsel-url-handler--tab-matches-p (tab url tab-match incognito)
+(defun browser-gt-url-handler--tab-matches-p (tab url tab-match incognito)
   "Return non-nil when TAB qualifies as already-open for URL under this route.
 TAB is a plist as returned by `GET_ALL_TABS'.  TAB-MATCH, when a
 non-empty string, is a regex used in place of identical-URL
@@ -202,14 +202,14 @@ incognito windows."
              (string-match-p tab-match tab-url)
            (string= tab-url url)))))
 
-(defun browsel-url-handler--find-existing-tab (url client incognito tab-match)
+(defun browser-gt-url-handler--find-existing-tab (url client incognito tab-match)
   "Return the most-recently-accessed matching tab from CLIENT, or nil.
 URL, INCOGNITO, and TAB-MATCH are forwarded to
-`browsel-url-handler--tab-matches-p' for the filter."
-  (let* ((tabs    (browsel-request "GET_ALL_TABS" nil client))
+`browser-gt-url-handler--tab-matches-p' for the filter."
+  (let* ((tabs    (browser-gt-request "GET_ALL_TABS" nil client))
          (matches (seq-filter
                    (lambda (tab)
-                     (browsel-url-handler--tab-matches-p
+                     (browser-gt-url-handler--tab-matches-p
                       tab url tab-match incognito))
                    (or tabs '()))))
     (car (seq-sort-by
@@ -219,50 +219,50 @@ URL, INCOGNITO, and TAB-MATCH are forwarded to
 
 ;; ── Open primitives ────────────────────────────────────────────────────────
 
-(defun browsel-url-handler--focus (tab client)
+(defun browser-gt-url-handler--focus (tab client)
   "Activate TAB inside CLIENT, raise its window, and nudge the macOS app.
-The OS-level app activation is delegated to `browsel-activate-client'
-in `browsel.el' (shared with `browsel-tab-manager')."
-  (browsel-request "FOCUS_TAB"
+The OS-level app activation is delegated to `browser-gt-activate-client'
+in `browser-gt.el' (shared with `browser-gt-tab-manager')."
+  (browser-gt-request "FOCUS_TAB"
                    (list :id (plist-get tab :id) :focusWindow t)
                    client)
-  (browsel-activate-client client))
+  (browser-gt-activate-client client))
 
-(defun browsel-url-handler--open-new (url client incognito)
+(defun browser-gt-url-handler--open-new (url client incognito)
   "Open URL in a new tab on CLIENT.
 INCOGNITO non-nil routes via `OPEN_INCOGNITO_TAB'; if that fails
 \(typically because the extension lacks the \"Allow in incognito\"
 toggle), the function warns and falls back to a normal tab so the
 URL still reaches the user.  After the tab is opened,
-`browsel-activate-client' brings the browser process to the OS
+`browser-gt-activate-client' brings the browser process to the OS
 foreground the same way the focus-existing-tab path does."
   (if (not incognito)
-      (browsel-request "OPEN_TAB" (list :url url) client)
+      (browser-gt-request "OPEN_TAB" (list :url url) client)
     (condition-case err
-        (browsel-request "OPEN_INCOGNITO_TAB" (list :url url) client)
+        (browser-gt-request "OPEN_INCOGNITO_TAB" (list :url url) client)
       (error
-       (message "browsel: incognito open failed (%s); using normal tab"
+       (message "Browser-gt: incognito open failed (%s); using normal tab"
                 (error-message-string err))
-       (browsel-request "OPEN_TAB" (list :url url) client))))
-  (browsel-activate-client client))
+       (browser-gt-request "OPEN_TAB" (list :url url) client))))
+  (browser-gt-activate-client client))
 
 ;; ── Public command ─────────────────────────────────────────────────────────
 
 ;;;###autoload
-(defun browsel-browse-url (url &rest _ignored)
-  "Open URL in a browser via browsel, honoring `browsel-url-routes'.
+(defun browser-gt-browse-url (url &rest _ignored)
+  "Open URL in a browser via browser-gt, honoring `browser-gt-url-routes'.
 
 URL is first passed through
-`browsel-browse-url-preprocess-functions' (an abnormal hook of
+`browser-gt-browse-url-preprocess-functions' (an abnormal hook of
 URL-rewriting functions applied in order); the rewritten URL is
 what routing, tab matching, and the browser dispatch all see.
 
 Two separate concerns:
 
   (a) ROUTING — which client to send the URL to.  The first route
-      in `browsel-url-routes' whose `:pattern' matches URL provides
+      in `browser-gt-url-routes' whose `:pattern' matches URL provides
       the client and incognito flag.  No route matches →
-      `browsel-default-client', non-incognito.  When the resolved
+      `browser-gt-default-client', non-incognito.  When the resolved
       client is the string \"eww\", the URL is opened in Emacs with
       `eww' and the rest of this docstring (tab matching, incognito,
       window raising) does not apply.
@@ -288,20 +288,20 @@ Compatible with `browse-url-browser-function'; extra arguments are
 accepted and ignored."
   (interactive (list (read-string "URL: ")))
   (let* ((url       (seq-reduce (lambda (u fn) (funcall fn u))
-                                browsel-browse-url-preprocess-functions
+                                browser-gt-browse-url-preprocess-functions
                                 url))
-         (route     (browsel-url-handler--match-route url))
-         ;; No route, no `browsel-default-client': pick a client now
-         ;; rather than erroring out.  `browsel--read-client-interactive'
+         (route     (browser-gt-url-handler--match-route url))
+         ;; No route, no `browser-gt-default-client': pick a client now
+         ;; rather than erroring out.  `browser-gt--read-client-interactive'
          ;; returns the sole connected client when there is only one,
          ;; prompts the user when there are several, and stores the
-         ;; chosen value into `browsel-default-client' so the next
+         ;; chosen value into `browser-gt-default-client' so the next
          ;; URL doesn't ask again.  It signals `user-error' when no
          ;; client is connected at all — same end state as before,
          ;; clearer message.
          (client    (or (plist-get route :client)
-                        browsel-default-client
-                        (browsel--read-client-interactive)))
+                        browser-gt-default-client
+                        (browser-gt--read-client-interactive)))
          (incognito (plist-get route :incognito))
          ;; Routing (which client) and tab matching (which existing
          ;; tab) follow different rules.  The route's `:pattern' is
@@ -309,12 +309,12 @@ accepted and ignored."
          ;; URL substring — the tab URL must fully contain the
          ;; requested URL.  An explicit `:tab-match' overrides.
          (tab-match (or (plist-get route :tab-match)
-                        (if (browsel-url-handler--bare-domain-p url)
+                        (if (browser-gt-url-handler--bare-domain-p url)
                             ;; Bare-domain shortcut: the host (minus
                             ;; `www.') is the needle, so a bare
                             ;; `amazon.ca/' still focuses an open
                             ;; `www.amazon.ca/...' tab.
-                            (let ((d (browsel-url-handler--domain url)))
+                            (let ((d (browser-gt-url-handler--domain url)))
                               (and d (regexp-quote d)))
                           ;; URL with a path: tab URL must contain the
                           ;; full requested URL.  Sub-pages of the
@@ -330,17 +330,17 @@ accepted and ignored."
      ((equal client "eww")
       (eww url))
      (t
-      (let ((existing (browsel-url-handler--find-existing-tab
+      (let ((existing (browser-gt-url-handler--find-existing-tab
                        url client incognito tab-match)))
         (if existing
-            (browsel-url-handler--focus existing client)
-          (browsel-url-handler--open-new url client incognito)))))))
+            (browser-gt-url-handler--focus existing client)
+          (browser-gt-url-handler--open-new url client incognito)))))))
 
-(provide 'browsel-url-handler)
+(provide 'browser-gt-url-handler)
 
 
 ;; Local Variables:
-;; package-lint-main-file: "browsel.el"
+;; package-lint-main-file: "browser-gt.el"
 ;; End:
 
-;;; browsel-url-handler.el ends here
+;;; browser-gt-url-handler.el ends here

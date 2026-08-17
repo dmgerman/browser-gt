@@ -18,13 +18,13 @@
 //                label.
 //
 // `readOrCreateIdentity(api)` returns { instance, label } — reading
-// both from storage.local under the `browsel-instance` and
-// `browsel-label` keys, generating a UUID on first call.  `label` is
+// both from storage.local under the `browser-gt-instance` and
+// `browser-gt-label` keys, generating a UUID on first call.  `label` is
 // left undefined when the user has not set one so the caller can fall
 // back to its build-time default.
 
-const KEY_INSTANCE = "browsel-instance";
-const KEY_LABEL    = "browsel-label";
+const KEY_INSTANCE = "browser-gt-instance";
+const KEY_LABEL    = "browser-gt-label";
 
 export async function readOrCreateIdentity(api) {
   const stored = await api.storage.local.get([KEY_INSTANCE, KEY_LABEL]);

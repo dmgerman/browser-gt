@@ -2,11 +2,11 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Daniel M. German <dmg@turingmachine.org>
 # Assisted-by: Claude:claude-opus-4-7
-"""Resize the canonical browsel toolbar artwork into icon sizes.
+"""Resize the canonical browser-gt toolbar artwork into icon sizes.
 
 Reads two square source artworks from ../doc/:
-    browsel-icon.png       — the default (orange/blue) variant
-    browsel-icon-red.png   — the consent-granted (all-red) variant
+    browser-gt-icon.png       — the default (orange/blue) variant
+    browser-gt-icon-red.png   — the consent-granted (all-red) variant
 
 Each artwork is delivered on a near-white square; the script
 flood-fills that surround with transparency from the corners (so the
@@ -43,8 +43,8 @@ FLOOD_THRESHOLD = 6
 # "icon" gives icon16/48/128.png; prefix "icon-red-" gives
 # icon-red-16/48/128.png.
 SOURCES = [
-    ("browsel-icon.png",     "icon"),
-    ("browsel-icon-red.png", "icon-red-"),
+    ("browser-gt-icon.png",     "icon"),
+    ("browser-gt-icon-red.png", "icon-red-"),
 ]
 
 

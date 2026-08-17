@@ -18,7 +18,7 @@ const identityUuidEl     = document.getElementById("identity-uuid");
 const swErrorEl          = document.getElementById("sw-error");
 const versionEl          = document.getElementById("version");
 
-// Show the extension's version next to the Browsel title so a user
+// Show the extension's version next to the browser-gt title so a user
 // glancing at the popup can tell which build is loaded — matches
 // what the options page has always shown.
 versionEl.textContent = `v${api.runtime.getManifest().version}`;
@@ -27,8 +27,8 @@ const LOGO_DEFAULT = "../icons/icon128.png";
 const LOGO_RED     = "../icons/icon-red-128.png";
 
 // Storage keys — must match identity.js and options.js.
-const IDENTITY_LABEL_KEY    = "browsel-label";
-const IDENTITY_INSTANCE_KEY = "browsel-instance";
+const IDENTITY_LABEL_KEY    = "browser-gt-label";
+const IDENTITY_INSTANCE_KEY = "browser-gt-instance";
 
 function isConsentLive(info) {
   return info?.state === "granted"
@@ -401,8 +401,8 @@ function showSwFailed() {
     ? "about:debugging#/runtime/this-firefox"
     : "chrome://extensions";
   const errorsHint = IS_FIREFOX
-    ? "click <em>Inspect</em> on the Browsel card and read the console"
-    : "click the <em>Errors</em> button on the Browsel card";
+    ? "click <em>Inspect</em> on the browser-gt card and read the console"
+    : "click the <em>Errors</em> button on the browser-gt card";
   swErrorEl.innerHTML = `
     <strong>Extension background script isn't running.</strong><br>
     Open <code>${page}</code>, ${errorsHint} for the exact reason,

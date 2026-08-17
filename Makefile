@@ -1,14 +1,14 @@
-# Top-level Makefile for browsel.
+# Top-level Makefile for browser-gt.
 #
 # Drives both the elisp side (compile, lint) and delegates to the
 # extension's own Makefile for the WebExtension builds.
 #
 # Targets:
 #   make                — compile + extension (default)
-#   make lint           — package-lint every browsel*.el file
-#   make checkdoc       — checkdoc every browsel*.el file (errors on any warning)
+#   make lint           — package-lint every browser-gt*.el file
+#   make checkdoc       — checkdoc every browser-gt*.el file (errors on any warning)
 #   make check-declare  — verify declare-function file arguments (errors on any mismatch)
-#   make compile        — byte-compile every browsel*.el file (errors on warning)
+#   make compile        — byte-compile every browser-gt*.el file (errors on warning)
 #   make extension      — rebuild Chrome + Firefox extension targets
 #                         (delegates to extension/Makefile's default target)
 #   make clean          — remove every *.elc file
@@ -16,7 +16,7 @@
 #   make check-ci       — same as `make check' but under $(CI_EMACS)
 #                         (defaults to emacs-plus@30, matching the
 #                         GitHub Actions matrix; run before pushing)
-#   make info           — rebuild browsel.info and dir from README.org
+#   make info           — rebuild browser-gt.info and dir from README.org
 #                         (both are committed artifacts, not cleaned).
 #                         Also runs from `default', `check', and `all',
 #                         gated by README.org's mtime, so a stale info
@@ -27,24 +27,24 @@
 
 EMACS ?= emacs
 
-# Foundational files first so follow-on files can (require 'browsel) without
+# Foundational files first so follow-on files can (require 'browser-gt) without
 # erroring when compiled in isolation.
-EL_FILES = browsel.el \
-           browsel-www.el \
-           browsel-chatgpt.el \
-           browsel-youtube.el \
-           browsel-tab-manager.el \
-           browsel-babel.el \
-           browsel-url-handler.el
+EL_FILES = browser-gt.el \
+           browser-gt-www.el \
+           browser-gt-chatgpt.el \
+           browser-gt-youtube.el \
+           browser-gt-tab-manager.el \
+           browser-gt-babel.el \
+           browser-gt-url-handler.el
 
 # Project-local ELPA so the user's personal package directory is not touched
 # and CI starts from a clean slate every run.
 ELPA_DIR = .elpa
 
 # Dependencies installed into the project-local ELPA before lint/compile.
-# `websocket' is the runtime dependency declared in browsel.el's
+# `websocket' is the runtime dependency declared in browser-gt.el's
 # Package-Requires; `package-lint' is the lint tool itself.  Vertico is
-# a *soft* runtime dependency of browsel-tab-manager.el — the anchor-
+# a *soft* runtime dependency of browser-gt-tab-manager.el — the anchor-
 # restore path prefers vertico's internals when they are available and
 # degrades gracefully otherwise — so it is NOT installed here.  Byte-
 # compile stays warning-free via the `declare-function' / `defvar'
@@ -64,7 +64,7 @@ EMACS_BATCH = $(EMACS) -Q --batch \
 # Default target: byte-compile the elisp, rebuild the WebExtension
 # bundles, and regenerate the Info manual if README.org changed.
 # Info regeneration is dependency-gated -- if README.org has not been
-# touched since browsel.info was last built, this is a no-op.  Lint is
+# touched since browser-gt.info was last built, this is a no-op.  Lint is
 # not included here so the common edit-then-`make' loop stays fast;
 # run `make check' or `make all' before committing.
 default: compile extension info
@@ -127,7 +127,7 @@ check-declare:
 # cannot mask a missing `require' in another.  Treats every byte-compile
 # warning as a hard error so CI catches them before commit.  `-L .' puts the
 # source tree on the load-path so files compile in order even though they
-# (require 'browsel) before browsel.elc exists.
+# (require 'browser-gt) before browser-gt.elc exists.
 compile: $(ELPA_DIR)/.installed
 	@set -e; \
 	for f in $(EL_FILES); do \
@@ -141,27 +141,27 @@ compile: $(ELPA_DIR)/.installed
 clean:
 	rm -f *.elc
 
-# Info manual (multi-file ELPA convention): browsel.info and dir both
+# Info manual (multi-file ELPA convention): browser-gt.info and dir both
 # live at the package root and are committed.  `make clean' does NOT
 # touch them -- they are source-of-truth artifacts consumed by ELPA
 # activation.  Regenerate after editing README.org.
-INFO_FILE = browsel.info
+INFO_FILE = browser-gt.info
 INFO_DIR  = dir
 
 info: $(INFO_FILE) $(INFO_DIR)
 
-# Stage README.org as browsel.org so Org's basename-derived output
+# Stage README.org as browser-gt.org so Org's basename-derived output
 # filename matches `#+texinfo_filename'.  Without this, Org produces
-# README.texi -> browsel.info (from @setfilename) and then its
+# README.texi -> browser-gt.info (from @setfilename) and then its
 # post-processing looks for README.info and fails.
 $(INFO_FILE): README.org
-	cp README.org browsel.org
+	cp README.org browser-gt.org
 	$(EMACS) -Q --batch \
 	  --eval "(setq load-prefer-newer t)" \
 	  --eval "(require 'ox-texinfo)" \
-	  browsel.org \
+	  browser-gt.org \
 	  -f org-texinfo-export-to-info
-	rm -f browsel.org browsel.texi
+	rm -f browser-gt.org browser-gt.texi
 
 $(INFO_DIR): $(INFO_FILE)
 	install-info --info-file=$(INFO_FILE) --dir-file=$(INFO_DIR)

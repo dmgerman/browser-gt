@@ -1,6 +1,6 @@
 {
   "extension": {
-    "name": "Browsel (Emacs bridge)",
+    "name": "browser-gt (Emacs bridge)",
     "version": "0.94",
     "description": "Bidirectional WebSocket bridge between a WebExtension (Chrome or Firefox) and a running Emacs instance.",
 
@@ -41,7 +41,7 @@
       },
       "action": {
         "default_popup": "html/popup.html",
-        "default_title": "Browsel",
+        "default_title": "browser-gt",
         "default_icon": {
           "16":  "icons/icon16.png",
           "48":  "icons/icon48.png",
@@ -66,7 +66,7 @@
       },
       "browser_action": {
         "default_popup": "html/popup.html",
-        "default_title": "Browsel",
+        "default_title": "browser-gt",
         "default_icon": {
           "16":  "icons/icon16.png",
           "48":  "icons/icon48.png",
@@ -75,7 +75,7 @@
       },
       "browser_specific_settings": {
         "gecko": {
-          "id": "browsel@dmgerman",
+          "id": "browser-gt@dmgerman",
           "strict_min_version": "115.0"
         }
       }

@@ -2,7 +2,7 @@
 // Copyright (C) 2026 Daniel M. German <dmg@turingmachine.org>
 // Assisted-by: Claude:claude-opus-4-7
 //
-// ws-client.js — WebSocket client used by every browsel target.
+// ws-client.js — WebSocket client used by every browser-gt target.
 //
 // One entry point: `startWebSocketClient(options)`.  It opens a
 // WebSocket to the Emacs server, identifies itself with a CLIENT_HELLO
@@ -39,7 +39,7 @@
 //   options.version           REQUIRED string, the extension's
 //                             manifest version.  Sent alongside the
 //                             client name; Emacs requires an exact
-//                             match against its `browsel-version'
+//                             match against its `browser-gt-version'
 //                             or it rejects the hello and the
 //                             connection enters the terminal
 //                             INCOMPATIBLE state.
@@ -166,7 +166,7 @@ export function startWebSocketClient(options) {
       // to distinguish "user labeled this install 'chrome'" from
       // "user has no label at all" — both would arrive as
       // `label: "chrome"' and the registry-versus-user-intent
-      // logic in `browsel--handle-client-hello' could not tell
+      // logic in `browser-gt--handle-client-hello' could not tell
       // which case applies.
       const helloPayload = {
         client:   options.clientName,

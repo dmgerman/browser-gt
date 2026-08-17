@@ -103,10 +103,10 @@ export async function forgetTabConsent(tabId) {
 
 function showConsentOverlay(code, timeoutMs) {
   return new Promise((resolve) => {
-    document.getElementById("__browsel-consent")?.remove();
+    document.getElementById("__browser-gt-consent")?.remove();
 
     const overlay = document.createElement("div");
-    overlay.id = "__browsel-consent";
+    overlay.id = "__browser-gt-consent";
     overlay.style.cssText = [
       "position: fixed",
       "top: 12px",

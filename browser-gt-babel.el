@@ -1,4 +1,4 @@
-;;; browsel-babel.el --- Org Babel integration for browsel  -*- lexical-binding: t; -*-
+;;; browser-gt-babel.el --- Org Babel integration for browser-gt  -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 Daniel M. German <dmg@turingmachine.org>
 
@@ -6,7 +6,7 @@
 ;; Assisted-by: Claude:claude-opus-4-7
 ;; Maintainer: Daniel M. German <dmg@turingmachine.org>
 ;; Keywords: comm, tools, browser, org, languages
-;; URL: https://github.com/dmgerman/browsel
+;; URL: https://github.com/dmgerman/browser-gt
 
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 ;;
@@ -25,11 +25,11 @@
 
 ;;; Commentary:
 
-;; Adds an `org-babel-execute:browsel-js' function so the user can
+;; Adds an `org-babel-execute:browser-gt-js' function so the user can
 ;; evaluate JavaScript in the browser's active tab from inside an org
 ;; source block and capture the return value.
 ;;
-;;   #+begin_src browsel-js
+;;   #+begin_src browser-gt-js
 ;;   document.querySelector('video').currentTime
 ;;   #+end_src
 ;;
@@ -60,7 +60,7 @@
 
 ;;; Code:
 
-(require 'browsel)
+(require 'browser-gt)
 (require 'org)
 
 ;; Forward-declare so we don't pull in the whole babel runtime at load time.
@@ -68,14 +68,14 @@
 
 (defvar org-src-lang-modes)
 
-;; Make C-c ' open browsel-js blocks in javascript-mode for syntax help.
+;; Make C-c ' open browser-gt-js blocks in javascript-mode for syntax help.
 ;; Called at load time; if `org-src' has not been loaded yet,
 ;; `org-src-lang-modes' is forward-declared above and `add-to-list'
 ;; will define it on first use.
 (eval-when-compile (require 'org-src nil t))
-(add-to-list 'org-src-lang-modes '("browsel-js" . js))
+(add-to-list 'org-src-lang-modes '("browser-gt-js" . js))
 
-(defun browsel-babel--first-result (response)
+(defun browser-gt-babel--first-result (response)
   "Return the JS return value from the first frame in RESPONSE.
 RESPONSE is the EVAL_IN_ACTIVE_TAB response payload."
   (let ((frames (plist-get response :result)))
@@ -89,7 +89,7 @@ RESPONSE is the EVAL_IN_ACTIVE_TAB response payload."
      :result)))
 
 ;;;###autoload
-(defun org-babel-execute:browsel-js (body params)
+(defun org-babel-execute:browser-gt-js (body params)
   "Execute BODY as JavaScript in the active browser tab.
 PARAMS is the alist of header arguments from the source block."
   (let* ((world    (or (cdr (assq :world  params)) "USER_SCRIPT"))
@@ -99,22 +99,22 @@ PARAMS is the alist of header arguments from the source block."
          (req-payload (append
                        (list :code body :world world)
                        (when tab-id (list :tabId tab-id))))
-         (response (browsel-request "EVAL_IN_ACTIVE_TAB"
+         (response (browser-gt-request "EVAL_IN_ACTIVE_TAB"
                                           req-payload client))
          (status   (plist-get response :status)))
     (unless (equal status "ok")
-      (error "browsel-js: %s"
+      (error "Browser-gt-js: %s"
              (or (plist-get response :message)
                  "browser returned non-ok status")))
     (if (equal frames "all")
         (plist-get response :result)
-      (browsel-babel--first-result response))))
+      (browser-gt-babel--first-result response))))
 
-(provide 'browsel-babel)
+(provide 'browser-gt-babel)
 
 
 ;; Local Variables:
-;; package-lint-main-file: "browsel.el"
+;; package-lint-main-file: "browser-gt.el"
 ;; End:
 
-;;; browsel-babel.el ends here
+;;; browser-gt-babel.el ends here

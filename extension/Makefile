@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Daniel M. German <dmg@turingmachine.org>
 
-EXTENSION_NAME ?= browsel-extension
+EXTENSION_NAME ?= browser-gt-extension
 VERSION        := $(shell python3 -c 'import json; print(json.load(open("config.json"))["extension"]["version"])')
 
 # ── Build targets and directories ────────────────────────────────────────────
@@ -90,7 +90,7 @@ help:
 	@echo "  make lint           validate config.json and check source files exist"
 	@echo "  make clean          remove build/ and $(DIST_DIR)/"
 	@echo "  make bump VERSION=X.Y[.Z]"
-	@echo "                      update browsel.el + config.json in lockstep"
+	@echo "                      update browser-gt.el + config.json in lockstep"
 
 # ── Source-side checks (no build artefacts) ─────────────────────────────────
 
@@ -162,7 +162,7 @@ clean:
 
 # ── Version bump ─────────────────────────────────────────────────────────────
 #
-# `browsel-version' in ../browsel.el and `extension.version' in
+# `browser-gt-version' in ../browser-gt.el and `extension.version' in
 # config.json must be the same string (CLIENT_HELLO is strict on
 # exact-match).  `make bump VERSION=X.Y[.Z]' rewrites both in place.
 # Rebuild afterwards (`make' or `make chrome'/`make firefox') so the

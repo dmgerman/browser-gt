@@ -125,7 +125,7 @@ const SHAPE_ADAPTERS = {
       // Most common failure: extension lacks "Allow in incognito" toggle.
       throw new Error(
         "open-incognito-tab: create incognito window failed (" + e.message +
-        "); enable 'Allow in incognito' for the browsel extension",
+        "); enable 'Allow in incognito' for the browser-gt extension",
       );
     }
     return (win && win.tabs && win.tabs[0]) || { status: "ok" };

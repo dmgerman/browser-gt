@@ -98,7 +98,7 @@ function notify(message) {
   api.notifications.create({
     type: "basic",
     iconUrl: api.runtime.getURL("icons/icon48.png"),
-    title: "Browsel",
+    title: "browser-gt",
     message,
   });
 }
@@ -476,6 +476,6 @@ export async function initRouter(transport) {
     await refreshAllTabIcons();
   } catch (e) {
     log("boot failed:", e);
-    notify(`Browsel boot failed: ${e?.message ?? e}`);
+    notify(`browser-gt boot failed: ${e?.message ?? e}`);
   }
 }

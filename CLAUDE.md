@@ -1,4 +1,4 @@
-# browsel
+# browser-gt
 
 Bidirectional WebSocket bridge between Emacs and a WebExtension on
 `127.0.0.1:9130`.  Two builds ship from the same sources: a Chrome
@@ -24,11 +24,11 @@ anything substantive.
 
 | Path                              | Owns                                                        |
 |-----------------------------------|-------------------------------------------------------------|
-| `browsel.el`                | Server lifecycle, JSON frame dispatch, async/sync request primitives, shared helpers, `ORG_CAPTURE` / `ORG_ROAM_CAPTURE` / `EWW` handlers |
-| `browsel-www.el`            | `SAVE_PAGE`                                                 |
-| `browsel-chatgpt.el`        | `CHATGPT`                                                   |
-| `browsel-youtube.el`        | `YOUTUBE`, `YOUTUBE_TRANSCRIPT`                              |
-| `browsel-babel.el`          | `org-babel-execute:browsel-js`                               |
+| `browser-gt.el`                | Server lifecycle, JSON frame dispatch, async/sync request primitives, shared helpers, `ORG_CAPTURE` / `ORG_ROAM_CAPTURE` / `EWW` handlers |
+| `browser-gt-www.el`            | `SAVE_PAGE`                                                 |
+| `browser-gt-chatgpt.el`        | `CHATGPT`                                                   |
+| `browser-gt-youtube.el`        | `YOUTUBE`, `YOUTUBE_TRANSCRIPT`                              |
+| `browser-gt-babel.el`          | `org-babel-execute:browser-gt-js`                               |
 | `extension/config.json`           | Single source of truth: shared `extension` block + per-target overlays in `extensionTargets.<name>`, plus menus, handlers, contentScripts |
 | `extension/src/`                  | Shared extension JS (handlers, popup, options, content scripts, consent) |
 | `extension/html/` / `icons/`      | Shared extension HTML + icons                                |
@@ -49,17 +49,17 @@ cd extension && make firefox      # builds build/firefox/ only (Manifest V2)
 # Elisp changes — byte-compile to catch warnings before reload.
 # Either let package.el resolve `websocket`:
 emacs --batch -Q --eval '(progn (require (quote package)) (package-initialize))' -L . \
-  --eval '(dolist (f (list "browsel.el" "browsel-www.el" \
-                           "browsel-chatgpt.el" "browsel-youtube.el" \
-                           "browsel-babel.el")) \
+  --eval '(dolist (f (list "browser-gt.el" "browser-gt-www.el" \
+                           "browser-gt-chatgpt.el" "browser-gt-youtube.el" \
+                           "browser-gt-babel.el")) \
            (or (byte-compile-file f) (kill-emacs 1)))'
 # ...or add the websocket package's directory with `-L` if the user uses
 # straight.el or similar:  -L <path-to-websocket>
 
 # Reload in the user's running Emacs:
-emacsclient -e '(progn (browsel-stop) \
-                       (load-file "browsel.el") \
-                       (browsel-start))'
+emacsclient -e '(progn (browser-gt-stop) \
+                       (load-file "browser-gt.el") \
+                       (browser-gt-start))'
 
 # Confirm the WS is reachable:
 lsof -nP -iTCP:9130 -sTCP:LISTEN
@@ -75,7 +75,7 @@ card in `chrome://extensions` — `make build` alone doesn't restart Chrome.
   historical context if a decision seems weird.
 - `ai/gotchas.md` — non-obvious failure modes encountered during the build
   that aren't documented elsewhere.  Read before debugging.
-- `~/.claude/skills/browsel/` — how to *use* the bridge from a
+- `~/.claude/skills/browser-gt/` — how to *use* the bridge from a
   Claude Code session (read tabs, eval JS, etc.).  Distinct from
   building the bridge itself.
 

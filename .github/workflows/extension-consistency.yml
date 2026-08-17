@@ -1,6 +1,6 @@
 name: extension-consistency
 
-# Users install browsel by cloning the repo and pointing Chrome/Firefox
+# Users install browser-gt by cloning the repo and pointing Chrome/Firefox
 # at extension/build/<target>/ directly — they do not run `make`.  That
 # means the tracked build tree must be self-contained: every ES-module
 # import a build .js makes must resolve to another tracked file in the

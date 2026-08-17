@@ -47,7 +47,7 @@ export async function evalInTab({ tabId, code, world }) {
   if (!isUsableWorld(world)) {
     throw new Error(
       `world: ${JSON.stringify(world)} is not supported on Firefox MV2; ` +
-      `browsel only runs scripts in the content-script isolated world. ` +
+      `browser-gt only runs scripts in the content-script isolated world. ` +
       `Use ":world USER_SCRIPT" or omit :world to run in the isolated context.`,
     );
   }

@@ -1,8 +1,15 @@
-#+title: browsel — ChangeLog
+#+title: browser-gt — ChangeLog
 #+author: Daniel M. German
 
 * development
 
+- Renamed the package from =browsel= to =browser-gt=.  This is a
+  distinct package published from https://github.com/dmgerman/browser-gt;
+  the old =browsel= repository is preserved unchanged during the
+  transition.  All elisp symbols, files, Info manual, MELPA recipe,
+  and the WebExtension itself (new Firefox gecko id
+  =browser-gt@dmgerman=) carry the new name.  Historical ChangeLog
+  entries below still reference =browsel= as they were written.
 - Replace browsel-tab-manager with browel-tab-jump
 - Add browsel-tab-manager as a dired style buffer where you can
   delete, bookmark or jump to open tabs.

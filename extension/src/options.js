@@ -142,8 +142,8 @@ document.getElementById("reset-raise").addEventListener("click", async () => {
 // here read-only so the user can identify this install without
 // digging into storage.
 
-const LABEL_KEY    = "browsel-label";
-const INSTANCE_KEY = "browsel-instance";
+const LABEL_KEY    = "browser-gt-label";
+const INSTANCE_KEY = "browser-gt-instance";
 
 async function renderIdentity() {
   const stored = await api.storage.local.get([LABEL_KEY, INSTANCE_KEY]);

@@ -47,7 +47,7 @@ const client = startWebSocketClient({
     browser.notifications.create({
       type: "basic",
       iconUrl: browser.runtime.getURL("icons/icon48.png"),
-      title: "Browsel",
+      title: "browser-gt",
       message: `Version mismatch: ${message}`,
     });
   },

@@ -1,20 +1,20 @@
-#+title: browsel — contributing
+#+title: browser-gt — contributing
 #+author: Daniel M. German
 
-Reference for extending =browsel=: adding new menu items,
+Reference for extending =browser-gt=: adding new menu items,
 adding new browser → Emacs handlers, adding new Emacs → browser
 handlers, or modifying the build pipeline.  Read =README.org= first
-for what =browsel= does and how it's set up.
+for what =browser-gt= does and how it's set up.
 
 * Repository layout
 
 | Path                      | Owns                                                                                                                                |
 |---------------------------+-------------------------------------------------------------------------------------------------------------------------------------|
-| =browsel.el=                | Server lifecycle, JSON frame dispatch, async/sync request primitives, shared helpers, =ORG_CAPTURE= / =ORG_ROAM_CAPTURE= / =EWW= handlers |
-| =browsel-www.el=            | =SAVE_PAGE=                                                                                                                           |
-| =browsel-chatgpt.el=        | =CHATGPT=                                                                                                                             |
-| =browsel-youtube.el=        | =YOUTUBE=, =YOUTUBE_TRANSCRIPT=                                                                                                         |
-| =browsel-babel.el=          | =org-babel-execute:browsel-js=                                                                                                        |
+| =browser-gt.el=                | Server lifecycle, JSON frame dispatch, async/sync request primitives, shared helpers, =ORG_CAPTURE= / =ORG_ROAM_CAPTURE= / =EWW= handlers |
+| =browser-gt-www.el=            | =SAVE_PAGE=                                                                                                                           |
+| =browser-gt-chatgpt.el=        | =CHATGPT=                                                                                                                             |
+| =browser-gt-youtube.el=        | =YOUTUBE=, =YOUTUBE_TRANSCRIPT=                                                                                                         |
+| =browser-gt-babel.el=          | =org-babel-execute:browser-gt-js=                                                                                                        |
 | =extension/config.json=     | Single source of truth for the extension (shared + per-target overlays)                                                             |
 | =extension/src/=            | Shared extension JS (handlers, popup, options, content scripts, consent)                                                            |
 | =extension/html/=, =icons/=   | Shared extension HTML + icons                                                                                                       |
@@ -46,7 +46,7 @@ Distinguished by which key is present.  Request names are
 
 Successful responses set =status: "ok"= and may include =message= (a
 human-readable line that bubbles up to =*Messages*= and the popup).
-Timeouts: =browsel-request-timeout= (default 10s) on the Emacs
+Timeouts: =browser-gt-request-timeout= (default 10s) on the Emacs
 side, 5s on the offscreen-doc side.
 
 *Client identification.*  Every browser issues a =CLIENT_HELLO=
@@ -57,10 +57,10 @@ Emacs-to-browser requests when more than one browser is connected.
 Until =CLIENT_HELLO= arrives the connection is tracked as
 =unknown-N=.  If two clients announce the same name a =-2=, =-3=, …
 suffix is appended.  Inspect the current roster with
-=browsel-connected-clients=.
+=browser-gt-connected-clients=.
 
 *Version gate.*  The =version= field in =CLIENT_HELLO= must match
-=browsel-version= exactly (string equality).  A missing field,
+=browser-gt-version= exactly (string equality).  A missing field,
 empty string, or any value that differs causes the handler to reply
 with ={ status: "error", message: "version mismatch: emacs=X
 extension=Y" }= and leave the client unregistered.  The extension's
@@ -81,13 +81,13 @@ Browser → Emacs (right-click, popup, hotkey, content-script relay):
    dispatches on the menu's =payload= field).
 2. Service worker hands to the offscreen doc, which sends the WS frame.
 3. Emacs's =:on-message= handler accumulates frames until complete,
-   parses JSON, looks up the handler in =browsel--handlers=,
+   parses JSON, looks up the handler in =browser-gt--handlers=,
    invokes it.
 4. Handler's return value becomes the response payload.
 
 Emacs → browser:
 
-1. =browsel-request= / =-async= generates a UUID, registers a
+1. =browser-gt-request= / =-async= generates a UUID, registers a
    callback, sends the frame.
 2. Offscreen doc receives, asks the service worker to dispatch
    (=handlers.js= =dispatchEmacsRequest=).
@@ -99,8 +99,8 @@ Emacs → browser:
 
 WebSocket libraries call message callbacks /per-frame/, not per
 message.  Big payloads (a page's HTML often runs >128 KB) come as one
-initial frame plus several continuation frames.  =browsel.el=
-buffers per-client via =browsel--rx-buffers= and only parses on
+initial frame plus several continuation frames.  =browser-gt.el=
+buffers per-client via =browser-gt--rx-buffers= and only parses on
 =websocket-frame-completep=.  Do not remove that — see
 =ai/gotchas.md=.
 
@@ -207,14 +207,14 @@ imports of un-listed files but not contentScripts entries themselves).
 | =ORG_CAPTURE=        | url, title, text, raise | Open org-capture                                  |
 | =ORG_ROAM_CAPTURE=   | url, title, text, raise | Open org-roam capture                             |
 | =EWW=                | url, raise              | Open URL in eww                                   |
-| =SAVE_PAGE=          | url, title, html        | Save main content to =browsel-www-archive-dir=      |
-| =CHATGPT=            | url, title, turns       | Save conversation to =browsel-chatgpt-dir=          |
-| =YOUTUBE=            | url, title, text, raise | Capture into =browsel-youtube-videos-file=          |
-| =YOUTUBE_TRANSCRIPT= | url, title, raise       | Save transcript to =browsel-youtube-transcript-dir= |
+| =SAVE_PAGE=          | url, title, html        | Save main content to =browser-gt-www-archive-dir=      |
+| =CHATGPT=            | url, title, turns       | Save conversation to =browser-gt-chatgpt-dir=          |
+| =YOUTUBE=            | url, title, text, raise | Capture into =browser-gt-youtube-videos-file=          |
+| =YOUTUBE_TRANSCRIPT= | url, title, raise       | Save transcript to =browser-gt-youtube-transcript-dir= |
 
 Capture handlers also prime three dynamic vars consumable from
-org-capture templates: =(browsel-get-url)=,
-=(browsel-get-title)=, =(browsel-get-selection)=.
+org-capture templates: =(browser-gt-get-url)=,
+=(browser-gt-get-title)=, =(browser-gt-get-selection)=.
 
 ** Emacs → browser
 
@@ -234,18 +234,18 @@ org-capture templates: =(browsel-get-url)=,
 
 | Variable                                     | Purpose                                                                      |
 |----------------------------------------------+------------------------------------------------------------------------------|
-| =browsel-port=                                 | WS server port (default 9130)                                                |
-| =browsel-host=                                 | bind address.  =local= = 127.0.0.1; =nil= = all interfaces                       |
-| =browsel-request-timeout=                      | seconds before async req aborts (default 10)                                 |
-| =browsel-debug=                                | when non-nil, log every WS frame to *browsel*                                  |
-| =browsel-org-capture-key=                      | template key passed to =org-capture= for =ORG_CAPTURE=; =nil= = interactive picker |
-| =browsel-pandoc-executable=                    | =pandoc= binary used by save-page and chatgpt                                  |
-| =browsel-www-archive-dir=                      | directory where save-page writes archives (set this)                         |
-| =browsel-chatgpt-dir=                          | directory where save-chatgpt writes conversations (set this)                 |
-| =browsel-youtube-api-key=                      | YouTube Data API v3 key, for video metadata                                  |
-| =browsel-youtube-videos-file=                  | org file the YouTube capture appends to (set this)                           |
-| =browsel-youtube-transcript-dir=               | directory where YouTube transcripts are written (set this)                   |
-| =browsel-youtube-transcript-yt-dlp-executable= | =yt-dlp= binary used to fetch subtitles                                        |
+| =browser-gt-port=                                 | WS server port (default 9130)                                                |
+| =browser-gt-host=                                 | bind address.  =local= = 127.0.0.1; =nil= = all interfaces                       |
+| =browser-gt-request-timeout=                      | seconds before async req aborts (default 10)                                 |
+| =browser-gt-debug=                                | when non-nil, log every WS frame to *browser-gt*                                  |
+| =browser-gt-org-capture-key=                      | template key passed to =org-capture= for =ORG_CAPTURE=; =nil= = interactive picker |
+| =browser-gt-pandoc-executable=                    | =pandoc= binary used by save-page and chatgpt                                  |
+| =browser-gt-www-archive-dir=                      | directory where save-page writes archives (set this)                         |
+| =browser-gt-chatgpt-dir=                          | directory where save-chatgpt writes conversations (set this)                 |
+| =browser-gt-youtube-api-key=                      | YouTube Data API v3 key, for video metadata                                  |
+| =browser-gt-youtube-videos-file=                  | org file the YouTube capture appends to (set this)                           |
+| =browser-gt-youtube-transcript-dir=               | directory where YouTube transcripts are written (set this)                   |
+| =browser-gt-youtube-transcript-yt-dlp-executable= | =yt-dlp= binary used to fetch subtitles                                        |
 
 The bundled =defvar= defaults assume a particular directory layout;
 the path variables should be set explicitly per installation.
@@ -255,7 +255,7 @@ the path variables should be set explicitly per installation.
 ** Add a new browser → Emacs handler
 
 #+begin_src emacs-lisp
-(browsel-register-handler
+(browser-gt-register-handler
  "OPEN_IN_FIREFOX"
  (lambda (payload)
    (start-process "ff" nil "open" "-a" "Firefox" (plist-get payload :url))
@@ -265,7 +265,7 @@ the path variables should be set explicitly per installation.
 Pair it with a config menu entry whose =request= matches the name.
 For long-running actions, use the respond-fast-then-defer pattern:
 return =((status . "ok"))= immediately, schedule the real work with
-=(browsel-defer #'do-it payload)=.
+=(browser-gt-defer #'do-it payload)=.
 
 ** Add a new Emacs → browser handler
 
@@ -278,11 +278,11 @@ in =extension/src/handlers.js= and reference it via =args-shape=.
 
 | Call                                                           | Notes                                                                             |
 |----------------------------------------------------------------+-----------------------------------------------------------------------------------|
-| =(browsel-request NAME PAYLOAD &optional CLIENT)=                | Sync.  Blocks with =accept-process-output=.  Do not call from inside a WS callback. |
-| =(browsel-request-async NAME PAYLOAD CALLBACK &optional CLIENT)= | Async.  Returns request id.  Always safe.                                         |
-| =(browsel-register-handler NAME FN)=                             | Register a browser → Emacs handler.  Overwrites on duplicate.                     |
-| =(browsel-connected-clients)=                                    | List of currently connected client names (newest first).                          |
-| =(browsel-defer FN &rest ARGS)=                                  | Schedule FN to run on the next idle tick — for respond-fast-then-defer.           |
+| =(browser-gt-request NAME PAYLOAD &optional CLIENT)=                | Sync.  Blocks with =accept-process-output=.  Do not call from inside a WS callback. |
+| =(browser-gt-request-async NAME PAYLOAD CALLBACK &optional CLIENT)= | Async.  Returns request id.  Always safe.                                         |
+| =(browser-gt-register-handler NAME FN)=                             | Register a browser → Emacs handler.  Overwrites on duplicate.                     |
+| =(browser-gt-connected-clients)=                                    | List of currently connected client names (newest first).                          |
+| =(browser-gt-defer FN &rest ARGS)=                                  | Schedule FN to run on the next idle tick — for respond-fast-then-defer.           |
 
 * Extending the Chrome extension side
 
@@ -304,7 +304,7 @@ Web pages can post a message to fire any Emacs handler:
 
 #+begin_src js
 window.postMessage(
-  { source: "browsel", name: "EWW", payload: { url: "..." } },
+  { source: "browser-gt", name: "EWW", payload: { url: "..." } },
   "*"
 );
 #+end_src
@@ -348,24 +348,24 @@ cd extension && make firefox   # only build/firefox/ (Manifest V2)
 emacs --batch -Q --eval '(require (quote package))' \
   --eval '(package-initialize)' \
   -L . \
-  --eval '(dolist (f (list "browsel.el" "browsel-www.el"
-                           "browsel-chatgpt.el" "browsel-youtube.el"
-                           "browsel-babel.el"))
+  --eval '(dolist (f (list "browser-gt.el" "browser-gt-www.el"
+                           "browser-gt-chatgpt.el" "browser-gt-youtube.el"
+                           "browser-gt-babel.el"))
            (or (byte-compile-file f) (kill-emacs 1)))'
 
 # Reload in a running Emacs:
-emacsclient -e '(progn (browsel-stop) (browsel-start))'
+emacsclient -e '(progn (browser-gt-stop) (browser-gt-start))'
 
 # Confirm WS bound and the Chrome extension connected:
 lsof -nP -iTCP:9130 -sTCP:LISTEN
-emacsclient -e '(format "clients=%d" (length browsel--clients))'
+emacsclient -e '(format "clients=%d" (length browser-gt--clients))'
 #+end_src
 
 * Debugging surfaces
 
 | Side             | Where                                                         |
 |------------------+---------------------------------------------------------------|
-| Emacs            | =(setq browsel-debug t)= → =*browsel*= buffer per frame           |
+| Emacs            | =(setq browser-gt-debug t)= → =*browser-gt*= buffer per frame           |
 | Emacs            | =*Messages*= for handler success/error                          |
 | Chrome extension | =chrome://extensions= → Details → Inspect views: service worker |
 | Chrome extension | =chrome://extensions= → Details → Inspect views: offscreen.html |

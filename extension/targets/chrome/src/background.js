@@ -57,7 +57,7 @@ async function ensureOffscreen() {
     // "WEB_RTC" is the closest documented reason for keeping a
     // long-lived socket alive.
     reasons: ["WEB_RTC"],
-    justification: "Hold the WebSocket connection to the Emacs browsel.",
+    justification: "Hold the WebSocket connection to the Emacs browser-gt.",
   });
   log("offscreen document created");
 }
@@ -163,7 +163,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       chrome.notifications.create({
         type: "basic",
         iconUrl: chrome.runtime.getURL("icons/icon48.png"),
-        title: "Browsel",
+        title: "browser-gt",
         message: `Version mismatch: ${msg.message}`,
       });
       chrome.action.setBadgeText({ text: "!" }).catch(() => {});

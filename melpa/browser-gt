@@ -1,3 +1,3 @@
-(browsel
+(browser-gt
  :fetcher github
- :repo "dmgerman/browsel")
+ :repo "dmgerman/browser-gt")

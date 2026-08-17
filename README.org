@@ -1,15 +1,15 @@
-#+title: browsel
+#+title: browser-gt
 #+author: Daniel M. German
-#+texinfo_filename: browsel.info
+#+texinfo_filename: browser-gt.info
 #+texinfo_dir_category: Emacs
-#+texinfo_dir_title: browsel: (browsel).
+#+texinfo_dir_title: browser-gt: (browser-gt).
 #+texinfo_dir_desc: Bidirectional communication with the web browser including a tab manager.
 
 #+attr_org: :width 240
 #+attr_html: :width 240 :align center
-[[file:doc/browsel-icon.png]]
+[[file:doc/browser-gt-icon.png]]
 
-=browsel= is a module that allows Emacs and a Web browser to
+=browser-gt= is a module that allows Emacs and a Web browser to
 communicate with each other, in both directions.  Right-click on a
 page in the Web browser (Chrome or Firefox) and have it sent to Emacs (org-capture, save-page,
 archive a ChatGPT conversation, save a YouTube video for later).
@@ -36,7 +36,7 @@ I have created a video to introduce its features:
 
 [[https://www.youtube.com/watch?v=8nSiG_hMZWI]]
      
-=browsel= is composed of two parts:
+=browser-gt= is composed of two parts:
 
 1. *An Emacs side*.  A WebSocket server on =127.0.0.1:9130= that
    registers handlers for actions initiated from the browser, plus
@@ -56,9 +56,9 @@ each side is below.
 Security has been a major concern in the design of this module. Please see [[*Security][Security]] below
 for more information.
 
-=browsel= was inspired by [[https://github.com/bitspook/spookfox][spookfox]], a similar Emacs/Firefox
+=browser-gt= was inspired by [[https://github.com/bitspook/spookfox][spookfox]], a similar Emacs/Firefox
 integration; the protocol and handler-registry pattern are adapted
-from it.  spookfox handles one direction (Emacs to browser); =browsel=
+from it.  spookfox handles one direction (Emacs to browser); =browser-gt=
 adds the reverse direction, so the browser can also invoke handlers
 registered by Emacs.
 
@@ -71,30 +71,30 @@ The full setup is documented in the *Setup* section below; this is
 the short form.
 
 1. *Configure and start the Emacs side.*  Add a =use-package= form to
-   your Emacs configuration that loads =browsel=, requires the
+   your Emacs configuration that loads =browser-gt=, requires the
    optional backends for the features you want, and starts the
    WebSocket server.
 
-   Install from [[https://melpa.org/#/browsel][MELPA]]:
+   Install from [[https://melpa.org/#/browser-gt][MELPA]]:
 
    #+begin_src emacs-lisp
    (use-package websocket
      :ensure t)
 
-   (use-package browsel
+   (use-package browser-gt
      :ensure t
      :config
-     (require 'browsel-www)         ; SAVE_PAGE
-     (require 'browsel-chatgpt)     ; CHATGPT
-     (require 'browsel-youtube)     ; YOUTUBE + YOUTUBE_TRANSCRIPT
-     (require 'browsel-babel)       ; org-babel browsel-js blocks
-     (require 'browsel-tab-manager) ; M-x browsel-tab-manager
-     (require 'browsel-url-handler) ; browsel-browse-url + browsel-url-routes
-     (browsel-start))
+     (require 'browser-gt-www)         ; SAVE_PAGE
+     (require 'browser-gt-chatgpt)     ; CHATGPT
+     (require 'browser-gt-youtube)     ; YOUTUBE + YOUTUBE_TRANSCRIPT
+     (require 'browser-gt-babel)       ; org-babel browser-gt-js blocks
+     (require 'browser-gt-tab-manager) ; M-x browser-gt-tab-manager
+     (require 'browser-gt-url-handler) ; browser-gt-browse-url + browser-gt-url-routes
+     (browser-gt-start))
    #+end_src
 
-   From a Git checkout instead, replace =:ensure t= on the =browsel=
-   form with =:load-path "/path/to/browsel"=.
+   From a Git checkout instead, replace =:ensure t= on the =browser-gt=
+   form with =:load-path "/path/to/browser-gt"=.
 
    Comment out any =require= for a feature you do not want.
 
@@ -135,46 +135,46 @@ does not, click *Reconnect*.
 
 ** In Emacs
 
-- =M-x browsel-tab-jump= -- completing-read jumper: pick a tab by
+- =M-x browser-gt-tab-jump= -- completing-read jumper: pick a tab by
   filter, focus it (ordered most-recently-used first by default).
-- =M-x browsel-tab-manager= -- persistent buffer view: dired-style
+- =M-x browser-gt-tab-manager= -- persistent buffer view: dired-style
   marking, bookmark, filter, sort, refresh.
-- =M-x browsel-org-link= -- insert an Org link to the active
+- =M-x browser-gt-org-link= -- insert an Org link to the active
   browser tab at point.
-- =M-x browsel-selection= -- insert the current text selection
+- =M-x browser-gt-selection= -- insert the current text selection
   from the active browser tab at point.
-- =M-x browsel-url= -- insert the URL of the active browser tab
+- =M-x browser-gt-url= -- insert the URL of the active browser tab
   at point.
-- =M-x browsel-title= -- insert the title of the active browser
+- =M-x browser-gt-title= -- insert the title of the active browser
   tab at point.
-- =M-x browsel-scroll-page= -- scroll the active tab one viewport
+- =M-x browser-gt-scroll-page= -- scroll the active tab one viewport
   down; numeric prefix scrolls N pages (negative = back); bare =C-u=
   scrolls one page back.
-- =M-x browsel-video-toggle-play= -- toggle play/pause on the first
+- =M-x browser-gt-video-toggle-play= -- toggle play/pause on the first
   =<video>= element in the active tab.
-- =M-x browsel-video-advance= -- seek the first =<video>= forward by
+- =M-x browser-gt-video-advance= -- seek the first =<video>= forward by
   5 seconds; numeric prefix sets a different N (negative = back);
   bare =C-u= seeks 5 seconds back.
-- =M-x browsel-video-current-time= -- insert the current playback
+- =M-x browser-gt-video-current-time= -- insert the current playback
   time of the first =<video>= as =H:MM:SS= / =M:SS= / =S= (leading
   zero components dropped).
-- =M-x browsel-youtube-org-link= -- insert an Org link to the
+- =M-x browser-gt-youtube-org-link= -- insert an Org link to the
   active YouTube tab at its current playback time (=&t=Ns= in the
   URL, =title @ timestamp= as the description); errors if the tab
   is not on youtube.com / youtu.be or has no video element.
-- =M-x browsel-set-default-client= -- when more than one browser is
+- =M-x browser-gt-set-default-client= -- when more than one browser is
   connected, pick which one interactive commands address; =C-u=
   clears the setting.
-- =M-x browsel-browse-url= (or set =browse-url-browser-function=
+- =M-x browser-gt-browse-url= (or set =browse-url-browser-function=
   to it) -- route a URL to a browser via the bridge; honors per-URL
-  rules in =browsel-url-routes= and focuses an already-open tab
+  rules in =browser-gt-url-routes= and focuses an already-open tab
   instead of duplicating it.
-- Org-Babel =browsel-js= source blocks that run JavaScript in the
+- Org-Babel =browser-gt-js= source blocks that run JavaScript in the
   active tab and return the value into the org buffer.
 - An elisp API to query and control the browser: list tabs, focus,
   open, close, evaluate JS with a return value.  See the section
   [[*Querying and controlling the browser from Emacs][Querying and controlling the browser from Emacs]] below and the
-  source of =browsel-tab-manager= for realistic usage examples.
+  source of =browser-gt-tab-manager= for realistic usage examples.
 
 ** Extensibility
 
@@ -240,7 +240,7 @@ a response counts as deny.
 
 * Querying and controlling the browser from Emacs
 
-The same =browsel-request= function used for JavaScript
+The same =browser-gt-request= function used for JavaScript
 evaluation also invokes the other handlers the browser extension
 exposes.  The built-in handler names cover the operations Emacs is
 most likely to need: =GET_ALL_TABS= returns the current tab list,
@@ -253,13 +253,13 @@ handler's payload keys and response shape are documented in
 #+begin_src emacs-lisp
 ;; List every open tab as title/url pairs
 (mapcar (lambda (tab) (cons (plist-get tab :title) (plist-get tab :url)))
-        (browsel-request "GET_ALL_TABS" nil))
+        (browser-gt-request "GET_ALL_TABS" nil))
 
 ;; Switch to a tab by id (and focus its window if it is in another window)
-(browsel-request "FOCUS_TAB" '(:id 1234 :focusWindow t))
+(browser-gt-request "FOCUS_TAB" '(:id 1234 :focusWindow t))
 
 ;; Open a new tab
-(browsel-request "OPEN_TAB" '(:url "https://example.com"))
+(browser-gt-request "OPEN_TAB" '(:url "https://example.com"))
 #+end_src
 
 ** API: Enumerating browsers and their tabs
@@ -267,63 +267,63 @@ handler's payload keys and response shape are documented in
 Four stable, higher-level functions sit on top of the raw request
 layer for the common case of "what browsers are connected, what
 tabs do they have, and how do I act on one?"  Downstream packages
-should build on these rather than call =browsel-request= directly,
+should build on these rather than call =browser-gt-request= directly,
 so upstream changes to the extension side stay invisible.
 
-*=browsel-browsers=* returns the currently-connected browsers as
-a list of plists.  Order matches =browsel-connected-clients=
+*=browser-gt-browsers=* returns the currently-connected browsers as
+a list of plists.  Order matches =browser-gt-connected-clients=
 (newest connection first).
 
 #+begin_src emacs-lisp
-(browsel-browsers)
+(browser-gt-browsers)
 ;; => ((:name "chrome"  :instance "eef7ed26-8f17-...")
 ;;     (:name "firefox" :instance "9cca5e87-87ac-..."))
 #+end_src
 
 Use =:name= when you need to talk to a browser right now (it's
-what =browsel-request= expects), and =:instance= when you need to
+what =browser-gt-request= expects), and =:instance= when you need to
 recognise this same install across Emacs sessions
-(=browsel-clients-file= keeps the name -> instance mapping
+(=browser-gt-clients-file= keeps the name -> instance mapping
 stable, but a downstream package that wants to persist a
 reference of its own should key on the UUID).
 
-*=browsel-browser-tabs &optional BROWSERS=* returns open tabs
+*=browser-gt-browser-tabs &optional BROWSERS=* returns open tabs
 from the selected browsers.
 
-- =nil= -- every entry in =browsel-connected-clients=.
+- =nil= -- every entry in =browser-gt-connected-clients=.
 - name string -- that single browser only.
 - list of strings -- every browser in the list.
 
 Signals =user-error= when no browser is connected, or when any
 requested name is not connected.  Each returned element is the
-extension's raw tab payload extended with two browsel-specific
-keys -- =:browsel-browser= (the origin browser's name) and
-=:browsel-instance= (its per-install UUID) -- so callers can route
+extension's raw tab payload extended with two browser-gt-specific
+keys -- =:browser-gt-browser= (the origin browser's name) and
+=:browser-gt-instance= (its per-install UUID) -- so callers can route
 follow-up requests back to the right browser without a separate
 lookup.
 
 #+begin_src emacs-lisp
 ;; Every tab from every connected browser.
-(browsel-browser-tabs)
+(browser-gt-browser-tabs)
 
 ;; Only Chrome.
-(browsel-browser-tabs "chrome")
+(browser-gt-browser-tabs "chrome")
 
 ;; Chrome + a Firefox-work profile.
-(browsel-browser-tabs '("chrome" "firefox-work"))
+(browser-gt-browser-tabs '("chrome" "firefox-work"))
 
 ;; Focus a tab back on the browser it came from.
-(dolist (tab (browsel-browser-tabs))
+(dolist (tab (browser-gt-browser-tabs))
   (when (string-match-p "example\\.com" (or (plist-get tab :url) ""))
-    (browsel-focus-tab tab t)))
+    (browser-gt-focus-tab tab t)))
 #+end_src
 
-*=browsel-focus-tab TAB &optional FOCUS-WINDOW=* switches the
-owning browser to TAB (a plist from =browsel-browser-tabs=).  It
-reads =:id= and =:browsel-browser= from TAB and dispatches
+*=browser-gt-focus-tab TAB &optional FOCUS-WINDOW=* switches the
+owning browser to TAB (a plist from =browser-gt-browser-tabs=).  It
+reads =:id= and =:browser-gt-browser= from TAB and dispatches
 =FOCUS_TAB= to the correct browser; FOCUS-WINDOW non-nil also
 raises the browser's OS window (and on macOS nudges the browser
-app itself when it is in =browsel-clients-needing-activation=).
+app itself when it is in =browser-gt-clients-needing-activation=).
 Signals =user-error= when TAB lacks either key or when its
 browser is disconnected.  Returns the browser response plist
 (=(:status "ok")= on success, =(:status "error" :message MSG)=
@@ -332,13 +332,13 @@ was closed between fetch and focus).
 
 #+begin_src emacs-lisp
 ;; Focus every open tab whose title matches a regex.
-(dolist (tab (browsel-browser-tabs))
+(dolist (tab (browser-gt-browser-tabs))
   (when (string-match-p "Inbox" (or (plist-get tab :title) ""))
-    (browsel-focus-tab tab t)))
+    (browser-gt-focus-tab tab t)))
 #+end_src
 
-*=browsel-close-tab TAB=* closes TAB in its owning browser.
-Reads =:id= and =:browsel-browser= from TAB and dispatches
+*=browser-gt-close-tab TAB=* closes TAB in its owning browser.
+Reads =:id= and =:browser-gt-browser= from TAB and dispatches
 =CLOSE_TAB=.  Signals =user-error= on missing keys or a
 disconnected browser.  Returns the browser response plist
 (=(:status "ok")= on success, =(:status "error" :message MSG)=
@@ -350,10 +350,10 @@ silently.
 
 #+begin_src emacs-lisp
 ;; Close every tab pointing at a specific host.
-(dolist (tab (browsel-browser-tabs))
+(dolist (tab (browser-gt-browser-tabs))
   (when (equal (url-host (url-generic-parse-url (or (plist-get tab :url) "")))
                "example.com")
-    (browsel-close-tab tab)))
+    (browser-gt-close-tab tab)))
 #+end_src
 
 The tab manager uses these functions internally; see
@@ -370,41 +370,41 @@ nothing.
 
 | Command                       | Interactive use                              | Lisp return value                       |
 |-------------------------------+----------------------------------------------+-----------------------------------------|
-| =browsel-org-link=     | inserts =[[URL][TITLE]]= for the active tab at point (=user-error= when the tab has no URL) | the link string, or nil when the tab has no URL |
-| =browsel-selection=    | inserts the active tab's selected text at point (empty inserts nothing; =user-error= from the eval layer on timeout or consent denial) | the selection ("" when nothing is selected); errors from the eval layer propagate |
-| =browsel-url=          | inserts the active tab's URL at point (=user-error= when the tab has no URL)     | the URL string (nil when the tab has no URL)   |
-| =browsel-title=        | inserts the active tab's title at point (=user-error= when the tab has no title) | the title string (nil when the tab has no title) |
-| =browsel-scroll-page=         | scrolls the active tab one viewport (sign-honored numeric prefix; bare =C-u= = back) | nil (the eval response)                |
-| =browsel-video-toggle-play=   | toggles play/pause on the first =<video>= element | interactive only                        |
-| =browsel-video-advance=       | seeks the first =<video>= by 5 seconds (numeric prefix N; bare =C-u= = back) | interactive only                        |
-| =browsel-video-current-time=  | inserts the first =<video>='s current time (=H:MM:SS= / =M:SS= / =S=) | the timestamp string                    |
-| =browsel-youtube-org-link= | inserts =[[URL&t=Ns][TITLE @ TIMESTAMP]]= for the active YouTube tab | the link string                         |
+| =browser-gt-org-link=     | inserts =[[URL][TITLE]]= for the active tab at point (=user-error= when the tab has no URL) | the link string, or nil when the tab has no URL |
+| =browser-gt-selection=    | inserts the active tab's selected text at point (empty inserts nothing; =user-error= from the eval layer on timeout or consent denial) | the selection ("" when nothing is selected); errors from the eval layer propagate |
+| =browser-gt-url=          | inserts the active tab's URL at point (=user-error= when the tab has no URL)     | the URL string (nil when the tab has no URL)   |
+| =browser-gt-title=        | inserts the active tab's title at point (=user-error= when the tab has no title) | the title string (nil when the tab has no title) |
+| =browser-gt-scroll-page=         | scrolls the active tab one viewport (sign-honored numeric prefix; bare =C-u= = back) | nil (the eval response)                |
+| =browser-gt-video-toggle-play=   | toggles play/pause on the first =<video>= element | interactive only                        |
+| =browser-gt-video-advance=       | seeks the first =<video>= by 5 seconds (numeric prefix N; bare =C-u= = back) | interactive only                        |
+| =browser-gt-video-current-time=  | inserts the first =<video>='s current time (=H:MM:SS= / =M:SS= / =S=) | the timestamp string                    |
+| =browser-gt-youtube-org-link= | inserts =[[URL&t=Ns][TITLE @ TIMESTAMP]]= for the active YouTube tab | the link string                         |
 
 Lisp examples:
 
 #+begin_src emacs-lisp
 ;; Build an org link for whatever is in the active tab.
-(let ((link (browsel-org-link)))
+(let ((link (browser-gt-org-link)))
   ...)
 
 ;; Read the user's current page selection.
-(let ((quote (browsel-selection)))
+(let ((quote (browser-gt-selection)))
   ...)
 
 ;; Programmatic scroll, three pages down.
-(browsel-scroll-page 3)
+(browser-gt-scroll-page 3)
 #+end_src
 
 When more than one browser is connected, the helpers (and
-=browsel-tab-manager=) use =browsel-default-client= as the default.
+=browser-gt-tab-manager=) use =browser-gt-default-client= as the default.
 Set it once in your config or change it interactively:
 
 #+begin_src emacs-lisp
 ;; permanent config
-(setq browsel-default-client "chrome")
+(setq browser-gt-default-client "chrome")
 #+end_src
 
-Or =M-x browsel-set-default-client= to pick the active browser for
+Or =M-x browser-gt-set-default-client= to pick the active browser for
 the rest of the session (=C-u= clears the setting).  If no default
 is set and a multi-client command runs, the first prompt's answer
 is remembered for subsequent commands in the session.
@@ -413,8 +413,8 @@ Programmatic Lisp callers can still talk to either browser at any
 time by passing the client name explicitly:
 
 #+begin_src emacs-lisp
-(browsel-org-link "firefox")
-(browsel-request "GET_ALL_TABS" nil "chrome")
+(browser-gt-org-link "firefox")
+(browser-gt-request "GET_ALL_TABS" nil "chrome")
 #+end_src
 
 ** Client names and how they persist
@@ -431,7 +431,7 @@ carrying three fields:
   Two profiles of the same browser get two distinct UUIDs because
   storage is profile-scoped.  Reconnects preserve it.
 - =label= -- the user-visible display name shown by
-  =browsel-connected-clients= and accepted by =browsel-default-client=.
+  =browser-gt-connected-clients= and accepted by =browser-gt-default-client=.
   Defaults to =client=; the extension's *Options* page has a text
   input labelled *Client label* to override it (e.g. =chrome-work=,
   =gmail=).
@@ -442,7 +442,7 @@ the display name in this order:
 1. If the user has set a label, use it.  On collision with another
    live client, append =-<first-6-hex>= of the instance UUID.
 2. Otherwise, if the instance is remembered in
-   =browsel-clients-file=, reuse the name it had last time.
+   =browser-gt-clients-file=, reuse the name it had last time.
 3. Otherwise, use the client kind (=chrome= / =firefox=), suffixing
    with UUID hex if that kind is already taken.
 
@@ -450,15 +450,15 @@ the display name in this order:
 same browser both want to be =chrome=; without a memory of past
 assignments, whichever one connects first would take the plain name
 and the other would get the suffix -- and that order can flip
-between Emacs sessions, silently redirecting =browsel-default-client
+between Emacs sessions, silently redirecting =browser-gt-default-client
 "chrome"= at a different install after a reboot.
-=browsel-clients-file= (default:
-=~/.emacs.d/browsel-clients.eld=) persists the =instance -> name=
+=browser-gt-clients-file= (default:
+=~/.emacs.d/browser-gt-clients.eld=) persists the =instance -> name=
 mapping across sessions so the same install keeps its name
 regardless of connection order.  It follows the same convention as
 =savehist-file=, =recentf-save-file=, and =bookmark-default-file=:
 one elisp form, atomic write, safe to delete (repopulates on the
-next hello).  Setting =browsel-clients-file= to =nil= disables
+next hello).  Setting =browser-gt-clients-file= to =nil= disables
 persistence.
 
 A relabel in the extension options page always wins over the
@@ -468,22 +468,22 @@ installs of the same browser reliably, set a distinct label on
 each; the registry then only matters as a safety net for the
 default case.
 
-** Route URLs through browsel
+** Route URLs through browser-gt
 
-=browsel-url-handler= provides =browsel-browse-url=, a function that
+=browser-gt-url-handler= provides =browser-gt-browse-url=, a function that
 sends URLs from Emacs to a connected browser.  Set
 =browse-url-browser-function= to it and every URL Emacs opens (org
 links, eww, mu4e, dired, ...) is routed to a chosen browser according
-to =browsel-url-routes=, optionally into an incognito window.  When
-a tab matching the URL is already open, =browsel-browse-url= focuses
+to =browser-gt-url-routes=, optionally into an incognito window.  When
+a tab matching the URL is already open, =browser-gt-browse-url= focuses
 that tab rather than opening a new one.
 
 #+begin_src emacs-lisp
-;; One-liner to send everything through browsel using browsel-default-client.
-(setq browse-url-browser-function #'browsel-browse-url)
+;; One-liner to send everything through browser-gt using browser-gt-default-client.
+(setq browse-url-browser-function #'browser-gt-browse-url)
 
 ;; Per-URL routing: first match wins.
-(setq browsel-url-routes
+(setq browser-gt-url-routes
       '((:pattern "github\\.com/"
          :client  "chrome")
         (:pattern "app\\.slack\\.com/"
@@ -509,7 +509,7 @@ Routing (which client) and tab matching (which open tab) are
 separate concerns:
 
 - *Routing* uses =:pattern=.  The first matching route picks the
-  client and the incognito flag.  No match -> =browsel-default-client=,
+  client and the incognito flag.  No match -> =browser-gt-default-client=,
   non-incognito.
 - *Tab matching* defaults to substring: the tab URL must contain
   the requested URL.  A sub-page of the requested URL still counts
@@ -527,15 +527,15 @@ window raised.  Otherwise a fresh tab is opened -- in an incognito
 window for incognito routes, in the active window otherwise.
 
 *Incognito caveat.*  Opening an incognito tab requires the user to
-toggle *Allow in incognito* for the browsel extension on
+toggle *Allow in incognito* for the browser-gt extension on
 =chrome://extensions= (or the Firefox equivalent).  Without that
 toggle the extension cannot enumerate or create incognito windows;
-=browsel-browse-url= detects the failure, warns, and falls back to a
+=browser-gt-browse-url= detects the failure, warns, and falls back to a
 normal tab so the URL still reaches the user.
 
 *** Rewrite URLs before dispatch
 
-=browsel-browse-url-preprocess-functions= is an abnormal hook of
+=browser-gt-browse-url-preprocess-functions= is an abnormal hook of
 URL-rewriting functions run before routing.  Each function receives
 a URL string and returns a URL string; functions apply in list order
 and the output of one is fed into the next.  Routing, tab matching,
@@ -549,7 +549,7 @@ and the like.  Functions must be pure (URL string in, URL string
 out) and must return the input unchanged when they do not apply.
 
 Example: un-mangle Microsoft Exchange "Safe Links" wrappers so
-=browsel= opens the real destination rather than the scanner URL.
+=browser-gt= opens the real destination rather than the scanner URL.
 The wrapper preserves the original URL verbatim, percent-encoded,
 inside its =url= query parameter, so the decode is lossless:
 
@@ -577,7 +577,7 @@ inside its =url= query parameter, so the decode is lossless:
           (or wrapped url))
       url)))
 
-(add-hook 'browsel-browse-url-preprocess-functions
+(add-hook 'browser-gt-browse-url-preprocess-functions
           #'my/unmangle-safelinks)
 #+end_src
 
@@ -588,10 +588,10 @@ the decode (with a small cap) if that matters in your mail flow.
 
 Two entry points, same underlying tab list.  Both aggregate tabs
 from every connected browser and route actions back to the owning
-browser.  =browsel-default-client= is intentionally ignored;
+browser.  =browser-gt-default-client= is intentionally ignored;
 narrow with a prefix argument or a keystroke instead.
 
-*** =browsel-tab-jump= -- completing-read jumper
+*** =browser-gt-tab-jump= -- completing-read jumper
 
 Reads a tab via the minibuffer.  Each candidate renders as
 =[CLIENT ][flags] DOMAIN  TITLE= -- the client column appears
@@ -603,7 +603,7 @@ space when unset), each with its own face.
 chrome     [a  ] mail.google.com                 Inbox (28) - xyz@gmail.com
 firefox    [ s ] www.youtube.com                 2026 F1 Barcelona GP race analysis
 chrome     [  i] duckduckgo.com                  Search results
-firefox    [   ] github.com                      GitHub - dmgerman/browsel
+firefox    [   ] github.com                      GitHub - dmgerman/browser-gt
 #+end_example
 
 In-prompt action keys:
@@ -613,7 +613,7 @@ In-prompt action keys:
 | =?=     | help buffer with the legend and the bindings below                       |
 | =RET=   | focus the highlighted tab and window, exit                               |
 | =M-RET= | show the highlighted tab in its browser window without raising it        |
-| =M-k=   | close the highlighted tab (see =browsel-tab-manager-confirm-close=)      |
+| =M-k=   | close the highlighted tab (see =browser-gt-tab-manager-confirm-close=)      |
 | =C-c c= | copy the URL to the kill ring, stay in the prompt                        |
 | =C-t=   | cycle sort order: =mru= -> =title= -> =domain= -> =window=                  |
 
@@ -625,13 +625,13 @@ With =consult= loaded, your =consult-narrow-key= filters
 candidates to a single browser in one keystroke (each connected
 browser becomes a narrow choice by first letter of its name).
 
-A prefix argument (=C-u M-x browsel-tab-jump=) prompts for one
+A prefix argument (=C-u M-x browser-gt-tab-jump=) prompts for one
 browser to restrict to.  Lisp callers can pass a name or a list
 of names as the optional =CLIENTS= argument.
 
-*** =browsel-tab-manager= -- buffer view
+*** =browser-gt-tab-manager= -- buffer view
 
-Opens =*browsel-tab-manager*= in =browsel-tab-manager-mode=
+Opens =*browser-gt-tab-manager*= in =browser-gt-tab-manager-mode=
 (a =tabulated-list-mode= derivative).  One line per tab, dired-style
 marking, persistent so you can keep it around and refresh with =g=.
 
@@ -672,11 +672,11 @@ Keymap:
 Dired one-mark-per-row: pressing =d= on a =B=-marked row (or vice
 versa) replaces the tag rather than layering.
 
-Bookmarks are stored via =browsel-tab-manager-bookmark-function=
+Bookmarks are stored via =browser-gt-tab-manager-bookmark-function=
 (a defcustom; default writes a =bookmark-store= record with a
-browsel-owned handler that calls =browse-url= on jump).  Vanilla
+browser-gt-owned handler that calls =browse-url= on jump).  Vanilla
 =bookmark-set= alone cannot make URL bookmarks -- it captures the
-current buffer's location -- so browsel provides its own tiny
+current buffer's location -- so browser-gt provides its own tiny
 handler function and does not rely on external autoloads.  Users
 of bookmark+ can override the defcustom to plug in
 =bmkp-jump-url-browse= for a nicer =*Bookmark List*= classification.
@@ -687,7 +687,7 @@ bookmarking via =b= + =x= silently suffixes =<2>=, =<3>=, ... on
 name collisions so no existing bookmark is overwritten during a
 batch.
 
-*** =browsel-tab-manager-close-duplicates=
+*** =browser-gt-tab-manager-close-duplicates=
 
 Sweeps duplicate tabs across every connected browser in a single
 operation.  Two tabs are duplicates when their URLs match after
@@ -700,20 +700,20 @@ sweep to.
 
 * Run JavaScript in any tab from Emacs
 
-** =browsel-request=
+** =browser-gt-request=
 
-=browsel-request= is the elisp function that sends a request to
+=browser-gt-request= is the elisp function that sends a request to
 the browser extension and returns its response.  It is the function
 you call whenever you want Emacs to invoke a handler in the browser
 extension -- including running JavaScript in a tab.  The call is
 synchronous: it blocks until the browser extension replies, or until
-=browsel-request-timeout= (10 seconds by default) elapses,
+=browser-gt-request-timeout= (10 seconds by default) elapses,
 whichever happens first.
 
 Its signature is:
 
 #+begin_src emacs-lisp
-(browsel-request NAME &optional PAYLOAD CLIENT)
+(browser-gt-request NAME &optional PAYLOAD CLIENT)
 #+end_src
 
 =NAME= is a string identifying the handler -- for example
@@ -729,7 +729,7 @@ more than one is connected, supply =CLIENT= to pick which browser
 runs the request; the function signals an error if =CLIENT= names a
 browser that is not currently connected, and also signals an error
 if more than one browser is connected and =CLIENT= is omitted.  Use
-=browsel-connected-clients= to inspect the current roster.
+=browser-gt-connected-clients= to inspect the current roster.
 
 The function returns a plist with two fields you should always check.
 =:status= is the string ="ok"= when the request succeeded and
@@ -772,18 +772,18 @@ calls made from inside another WebSocket callback), use the
 asynchronous variant:
 
 #+begin_src emacs-lisp
-(browsel-request-async NAME PAYLOAD CALLBACK &optional CLIENT)
+(browser-gt-request-async NAME PAYLOAD CALLBACK &optional CLIENT)
 #+end_src
 
 It returns the request id immediately and invokes =CALLBACK= with the
 response plist once the browser extension replies.  Unlike the
 synchronous form, it is safe to use from any context.  =CLIENT= has
-the same meaning as in =browsel-request=.
+the same meaning as in =browser-gt-request=.
 
 ** Minimal example
 
 #+begin_src emacs-lisp
-(browsel-request "EVAL_IN_ACTIVE_TAB"
+(browser-gt-request "EVAL_IN_ACTIVE_TAB"
                        '(:code "document.querySelector('video').currentTime"))
 ;; => (:status "ok"
 ;;     :result ((:documentId "..." :frameId 0 :result 60.34)))
@@ -798,17 +798,17 @@ JavaScript expression, not the surrounding response envelope.  The
 pattern for extracting it from a single-frame result is:
 
 #+begin_src emacs-lisp
-(let ((r (browsel-request "EVAL_IN_ACTIVE_TAB"
+(let ((r (browser-gt-request "EVAL_IN_ACTIVE_TAB"
                                 '(:code "document.title"))))
   (plist-get (car (plist-get r :result)) :result))
 ;; => "Subscriptions - YouTube"
 #+end_src
 
-** =browsel-js= source blocks
+** =browser-gt-js= source blocks
 
-For one-off JavaScript snippets, writing out a =browsel-request=
-call by hand is more typing than necessary.  The =browsel-babel=
-module provides =org-babel-execute:browsel-js=, which exposes the
+For one-off JavaScript snippets, writing out a =browser-gt-request=
+call by hand is more typing than necessary.  The =browser-gt-babel=
+module provides =org-babel-execute:browser-gt-js=, which exposes the
 same request as an org-mode source block: the body of the block
 becomes the =:code= payload, and the value of the last JavaScript
 expression is returned as the block's result.  Babel handles the
@@ -837,7 +837,7 @@ the spaces are only there so the nested source blocks render inside
 the outer block when this README is displayed as org.)
 
 #+begin_example
-# +begin_src browsel-js
+# +begin_src browser-gt-js
 document.querySelector('video').currentTime
 # +end_src
 #+end_example
@@ -846,7 +846,7 @@ document.querySelector('video').currentTime
 *Pause playback and report the new state:*
 
 #+begin_example
-# +begin_src browsel-js
+# +begin_src browser-gt-js
 const v = document.querySelector('video');
 v.pause();
 ({ paused: v.paused, at: v.currentTime })
@@ -856,7 +856,7 @@ v.pause();
 *Collect several page properties into one object:*
 
 #+begin_example
-# +begin_src browsel-js
+# +begin_src browser-gt-js
 ({ url: location.href,
    title: document.title,
    selection: getSelection().toString(),
@@ -868,7 +868,7 @@ v.pause();
 backend awaits the returned promise):
 
 #+begin_example
-# +begin_src browsel-js
+# +begin_src browser-gt-js
 (async () => {
   const r = await fetch(location.href);
   return { status: r.status, length: (await r.text()).length };
@@ -879,7 +879,7 @@ backend awaits the returned promise):
 *Run in a specific tab instead of the active one:*
 
 #+begin_example
-# +begin_src browsel-js :tab-id 1234567890
+# +begin_src browser-gt-js :tab-id 1234567890
 document.title
 # +end_src
 #+end_example
@@ -887,7 +887,7 @@ document.title
 *Return every frame's result (for pages with cross-origin iframes):*
 
 #+begin_example
-# +begin_src browsel-js :frames all
+# +begin_src browser-gt-js :frames all
 location.origin
 # +end_src
 #+end_example
@@ -895,7 +895,7 @@ location.origin
 *Pick a browser when more than one is connected:*
 
 #+begin_example
-# +begin_src browsel-js :client firefox
+# +begin_src browser-gt-js :client firefox
 navigator.userAgent
 # +end_src
 #+end_example
@@ -912,13 +912,13 @@ omitting =:client= signals an error and lists the connected names.
 
 - Emacs 27.1 or newer.
 - =websocket= package 1.13 or newer.
-- Org-mode 9.8 or newer (=browsel-youtube='s inline-image refresh
+- Org-mode 9.8 or newer (=browser-gt-youtube='s inline-image refresh
   calls =org-link-preview-region=, which replaced the obsoleted
   =org-display-inline-images= in Org 9.8).
 - Chrome / Chromium or Firefox.
 
 Per-feature.  Each row is needed *only* if you invoke that feature;
-the rest of =browsel= keeps working without it.
+the rest of =browser-gt= keeps working without it.
 
 | Feature                            | Needed                            | What "missing" looks like                                  |
 |------------------------------------+-----------------------------------+-------------------------------------------------------------|
@@ -926,18 +926,18 @@ the rest of =browsel= keeps working without it.
 | =SAVE_PAGE= / =CHATGPT=            | =pandoc= on =$PATH=               | Errors at save time; the right-click action fails          |
 | =YOUTUBE_TRANSCRIPT=               | =yt-dlp= on =$PATH=               | Errors at fetch time                                        |
 | Rich =YOUTUBE= metadata            | YouTube Data API v3 key           | Capture still works, but without title/duration/description |
-| Live-hover actions in =browsel-tab-jump= | =vertico= completion frontend | Actions target the accepted candidate rather than the row currently highlighted |
+| Live-hover actions in =browser-gt-tab-jump= | =vertico= completion frontend | Actions target the accepted candidate rather than the row currently highlighted |
 | Optional Emacs-side modules        | corresponding =(require ...)= in the use-package =:config= | Their handlers aren't registered; that name returns "Unknown request" |
 
-If you don't load a module (e.g. don't =(require 'browsel-youtube)=),
+If you don't load a module (e.g. don't =(require 'browser-gt-youtube)=),
 none of its external dependencies are needed.
 
 ** Emacs
 
-The elisp files are distributed through [[https://melpa.org/#/browsel][MELPA]].
-=M-x package-install RET browsel RET= installs the core =browsel.el=
-along with =browsel-www=, =browsel-chatgpt=, =browsel-youtube=,
-=browsel-babel=, =browsel-tab-manager=, and =browsel-url-handler=.
+The elisp files are distributed through [[https://melpa.org/#/browser-gt][MELPA]].
+=M-x package-install RET browser-gt RET= installs the core =browser-gt.el=
+along with =browser-gt-www=, =browser-gt-chatgpt=, =browser-gt-youtube=,
+=browser-gt-babel=, =browser-gt-tab-manager=, and =browser-gt-url-handler=.
 A Git checkout is also supported; point =:load-path= at the clone.
 
 The browser extension under =extension/= is not distributed through
@@ -955,52 +955,52 @@ From MELPA:
 #+begin_src emacs-lisp
 (use-package websocket :ensure t)
 
-(use-package browsel
+(use-package browser-gt
   :ensure t
   :after websocket
   :config
-  (require 'browsel-www)         ; SAVE_PAGE        (web archive)
-  (require 'browsel-chatgpt)     ; CHATGPT          (save conversation)
-  (require 'browsel-youtube)     ; YOUTUBE + YOUTUBE_TRANSCRIPT
-  (require 'browsel-babel)       ; org-babel browsel-js blocks
-  (require 'browsel-tab-manager) ; M-x browsel-tab-manager
-  (require 'browsel-url-handler) ; browsel-browse-url + browsel-url-routes
-  (browsel-start))
+  (require 'browser-gt-www)         ; SAVE_PAGE        (web archive)
+  (require 'browser-gt-chatgpt)     ; CHATGPT          (save conversation)
+  (require 'browser-gt-youtube)     ; YOUTUBE + YOUTUBE_TRANSCRIPT
+  (require 'browser-gt-babel)       ; org-babel browser-gt-js blocks
+  (require 'browser-gt-tab-manager) ; M-x browser-gt-tab-manager
+  (require 'browser-gt-url-handler) ; browser-gt-browse-url + browser-gt-url-routes
+  (browser-gt-start))
 #+end_src
 
-From a Git checkout instead, replace =:ensure t= on the =browsel=
-form with =:load-path "/path/to/browsel"=.
+From a Git checkout instead, replace =:ensure t= on the =browser-gt=
+form with =:load-path "/path/to/browser-gt"=.
 
-The server binds =127.0.0.1:9130=.  =(browsel-stop)= /
-=(browsel-start)= start and stop it explicitly.  =(setq
-browsel-debug t)= logs every WebSocket frame to the
-=*browsel*= buffer for protocol debugging.
+The server binds =127.0.0.1:9130=.  =(browser-gt-stop)= /
+=(browser-gt-start)= start and stop it explicitly.  =(setq
+browser-gt-debug t)= logs every WebSocket frame to the
+=*browser-gt*= buffer for protocol debugging.
 
 Configuration variables for paths, output locations, and credentials
 (full list in =CONTRIBUTING.org=):
 
 | Variable                                | Purpose                                       |
 |-----------------------------------------+-----------------------------------------------|
-| =browsel-www-archive-dir=         | where save-page writes archived pages         |
-| =browsel-chatgpt-dir=             | where save-chatgpt writes conversations       |
-| =browsel-youtube-videos-file=     | org file the YouTube capture appends to       |
-| =browsel-youtube-transcript-dir=  | where transcripts are written                 |
-| =browsel-youtube-api-key=         | YouTube Data API v3 key (for video metadata)  |
-| =browsel-org-capture-key=         | org-capture template key for browser captures |
-| =browsel-default-client=          | default browser client for every browsel command |
-| =browsel-url-routes=              | per-pattern URL routing for =browsel-browse-url= |
-| =browsel-browse-url-preprocess-functions= | abnormal hook of URL-rewriting functions run before routing |
-| =browsel-client-connected-functions=    | abnormal hook run with the client name after a CLIENT_HELLO is fully registered |
-| =browsel-client-disconnected-functions= | abnormal hook run with the client name after its WebSocket closes |
-| =browsel-clients-needing-activation= | client names whose macOS app needs an explicit foreground nudge after focus (default =("firefox")=) |
-| =browsel-client-app-names=        | fallback macOS application names per client when the PID-based activation can't find the process |
-| =browsel-tab-manager-sort=        | initial sort key for both tab commands (default =mru=; cycle with =C-t= in jump, =s= in manager) |
-| =browsel-tab-manager-confirm-close= | when non-nil, =M-k= (jump) and =x= (manager, with =D= marks) prompt before closing.  =D= in the manager always bypasses. |
-| =browsel-tab-manager-domain-column-width= | width of the Domain column                    |
-| =browsel-tab-manager-url-column-width=    | width of the URL column when the manager's URL view (=v=) is on |
-| =browsel-tab-manager-client-column-width= | width of the Client column when 2+ browsers are represented |
-| =browsel-tab-manager-accessed-column-width= | width of the Age column when the manager's Age view (=a=) is on |
-| =browsel-tab-manager-bookmark-function= | function used by the manager's =b= / =B= actions to save a bookmark; default calls =bookmark-store= with a browsel-owned handler that dispatches via =browse-url= |
+| =browser-gt-www-archive-dir=         | where save-page writes archived pages         |
+| =browser-gt-chatgpt-dir=             | where save-chatgpt writes conversations       |
+| =browser-gt-youtube-videos-file=     | org file the YouTube capture appends to       |
+| =browser-gt-youtube-transcript-dir=  | where transcripts are written                 |
+| =browser-gt-youtube-api-key=         | YouTube Data API v3 key (for video metadata)  |
+| =browser-gt-org-capture-key=         | org-capture template key for browser captures |
+| =browser-gt-default-client=          | default browser client for every browser-gt command |
+| =browser-gt-url-routes=              | per-pattern URL routing for =browser-gt-browse-url= |
+| =browser-gt-browse-url-preprocess-functions= | abnormal hook of URL-rewriting functions run before routing |
+| =browser-gt-client-connected-functions=    | abnormal hook run with the client name after a CLIENT_HELLO is fully registered |
+| =browser-gt-client-disconnected-functions= | abnormal hook run with the client name after its WebSocket closes |
+| =browser-gt-clients-needing-activation= | client names whose macOS app needs an explicit foreground nudge after focus (default =("firefox")=) |
+| =browser-gt-client-app-names=        | fallback macOS application names per client when the PID-based activation can't find the process |
+| =browser-gt-tab-manager-sort=        | initial sort key for both tab commands (default =mru=; cycle with =C-t= in jump, =s= in manager) |
+| =browser-gt-tab-manager-confirm-close= | when non-nil, =M-k= (jump) and =x= (manager, with =D= marks) prompt before closing.  =D= in the manager always bypasses. |
+| =browser-gt-tab-manager-domain-column-width= | width of the Domain column                    |
+| =browser-gt-tab-manager-url-column-width=    | width of the URL column when the manager's URL view (=v=) is on |
+| =browser-gt-tab-manager-client-column-width= | width of the Client column when 2+ browsers are represented |
+| =browser-gt-tab-manager-accessed-column-width= | width of the Age column when the manager's Age view (=a=) is on |
+| =browser-gt-tab-manager-bookmark-function= | function used by the manager's =b= / =B= actions to save a bookmark; default calls =bookmark-store= with a browser-gt-owned handler that dispatches via =browse-url= |
 
 The full list is in =CONTRIBUTING.org=.
 
@@ -1014,7 +1014,7 @@ In Chrome:
 
 1. Open =chrome://extensions= and turn on *Developer mode* (top right).
 2. Click *Load unpacked* and select =extension/build/chrome/=.
-3. For JavaScript evaluation (=EVAL_IN_ACTIVE_TAB= and =browsel-js=
+3. For JavaScript evaluation (=EVAL_IN_ACTIVE_TAB= and =browser-gt-js=
    source blocks), open the extension's *Details* page and turn on
    *Allow User Scripts*.  Skip this step if you only use the
    right-click and popup actions.
@@ -1060,7 +1060,7 @@ targets a specific one of several connected browsers through the
 
 ** What differs
 
-- =EVAL_IN_ACTIVE_TAB= and =browsel-js= source blocks run in the
+- =EVAL_IN_ACTIVE_TAB= and =browser-gt-js= source blocks run in the
   content-script isolated world.  The portable ="USER_SCRIPT"=
   default works on both browsers; passing =:world "MAIN"= is Chrome
   only and a block that needs MAIN will surface a clear error on
@@ -1071,7 +1071,7 @@ targets a specific one of several connected browsers through the
 ** Customising
 
 Most things are reachable from the popup -> Options page (or
-=chrome://extensions= -> Browsel -> Extension options):
+=chrome://extensions= -> browser-gt -> Extension options):
 
 - *Raise Emacs* -- a checkbox per action.  When checked, Emacs is
   brought to the foreground after that action completes.  Stored in
@@ -1089,7 +1089,7 @@ Running an unpacked Web browser extension requires the browser's
 developer affordance to be enabled: in Chrome, *Developer mode* in
 =chrome://extensions=; in Firefox, *Load Temporary Add-on* in
 =about:debugging=.  This is a browser-level requirement, not a
-=browsel= feature.  Without it the extension does not run, no
+=browser-gt= feature.  Without it the extension does not run, no
 WebSocket is opened, and none of the features below are available.
 
 The security posture of the running extension depends on which
@@ -1118,17 +1118,17 @@ place in your editor.  No additional browser permissions are required.
 
 ** Evaluating JavaScript in tabs
 
-=EVAL_IN_ACTIVE_TAB= and the =browsel-js= source blocks run arbitrary
+=EVAL_IN_ACTIVE_TAB= and the =browser-gt-js= source blocks run arbitrary
 JavaScript inside a tab, which can read the DOM, cookies,
 =localStorage=, and any in-page state.  Two protections cover this
 capability:
 
 1. The Chrome-level toggle *Allow User Scripts* (=chrome://extensions=
-   -> Browsel -> Details).  When this is off, =EVAL_IN_ACTIVE_TAB=
+   -> browser-gt -> Details).  When this is off, =EVAL_IN_ACTIVE_TAB=
    fails with a clear error; every other feature continues to work.
    Leave it off if JavaScript evaluation is not a capability you need.
 
-2. When *Allow User Scripts* is on, =browsel= still requires
+2. When *Allow User Scripts* is on, =browser-gt= still requires
    per-tab consent before any script runs.  The first
    =EVAL_IN_ACTIVE_TAB= request to a tab displays an in-page overlay
    showing the code about to run, with four buttons: *Deny*, *Allow
@@ -1165,11 +1165,11 @@ For the deeper threat model and what is /not/ protected, see
 
 | Symptom                                   | First thing to try                                                            |
 |-------------------------------------------+-------------------------------------------------------------------------------|
-| Popup shows Disconnected                  | Click Reconnect.  If still red: reload the browser extension card (Chrome: =chrome://extensions=; Firefox: =about:debugging=).  If still red: =M-x browsel-start=. |
+| Popup shows Disconnected                  | Click Reconnect.  If still red: reload the browser extension card (Chrome: =chrome://extensions=; Firefox: =about:debugging=).  If still red: =M-x browser-gt-start=. |
 | =EVAL_IN_ACTIVE_TAB= errors                | On Chrome: toggle *Allow User Scripts* on in the extension's Details.  On Firefox MV2: only =:world "USER_SCRIPT"= is supported; =:world "MAIN"= is rejected. |
 | Consent overlay never appears             | =chrome://=, =chrome-extension://=, and the Web Store refuse eval -- Chrome policy. |
 | "no client connected" from elisp          | browser extension isn't connected.  Check the popup; reload if needed.         |
-| =browsel-start= says "address in use" | Another process is already on 9130.  =lsof -nP -iTCP:9130 -sTCP:LISTEN= to see which. |
+| =browser-gt-start= says "address in use" | Another process is already on 9130.  =lsof -nP -iTCP:9130 -sTCP:LISTEN= to see which. |
 | Save-page produces no notification        | Check =*Messages*=; the handler logs success/failure there.                    |
 
 * License
@@ -1179,10 +1179,10 @@ GPL-3.0-or-later.  The full license text is in =LICENSE=.
 
 * Info manual
 
-The Info version of this README (=browsel.info=) and its =dir= entry
+The Info version of this README (=browser-gt.info=) and its =dir= entry
 live at the package root, following the multi-file ELPA convention.
 =package.el= adds the package's directory to =Info-directory-list=
-automatically on activation, so =C-h i= lists =browsel= under the
+automatically on activation, so =C-h i= lists =browser-gt= under the
 =Emacs= category with no user configuration.
 
 For installs that bypass =package.el= (raw =:load-path=, git
@@ -1193,11 +1193,11 @@ package directory once:
 (with-eval-after-load 'info
   (info-initialize)
   (add-to-list 'Info-directory-list
-               (file-name-directory (locate-library "browsel"))))
+               (file-name-directory (locate-library "browser-gt"))))
 #+end_src
 
 After editing =README.org=, regenerate the Info file with =make
-info=.  Both =browsel.info= and =dir= are committed source-of-truth
+info=.  Both =browser-gt.info= and =dir= are committed source-of-truth
 artifacts and are refreshed together.
 
 
