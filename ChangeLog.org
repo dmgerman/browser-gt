@@ -1,7 +1,7 @@
 #+title: browser-gt — ChangeLog
 #+author: Daniel M. German
 
-* development
+* 0.95
 
 - Renamed the package from =browsel= to =browser-gt=.  This is a
   distinct package published from https://github.com/dmgerman/browser-gt;
@@ -16,6 +16,11 @@
 - Do not fail if port for server already in use (warn instead).
 - Added info file.  
 - add functions browsel-url and browsel-title to retrieve url and title.
+- added function hooks  browsel-client-connected-functions and
+  browsel-client-disconnected-functions to notify others when
+  the clients (extensions) connect/disconnect
+- Improved error messages
+- Improved documentation, including providing an info file  
 
 * 0.94 
 
