@@ -7,30 +7,26 @@
 
 #+attr_org: :width 240
 #+attr_html: :width 240 :align center
-[[file:doc/browser-gt-icon.png]]
+
 
 =browser-gt= is a module that allows Emacs and a Web browser to
-communicate with each other, in both directions.  Right-click on a
-page in the Web browser (Chrome or Firefox) and have it sent to Emacs (org-capture, save-page,
-archive a ChatGPT conversation, save a YouTube video for later).
-Going the other way: from Emacs query browser state (what tabs are
-open?  what's the page title?  what's the video's current time?) and
-act on it.
+communicate with each other, in both directions.
 
-- extensible browser menu where you can request emacs to do something. currently:
-  - org-capture
-  - org-roam-capture
-  - save current transcript video
-  - save current video info
-  - save current chatGPT session to an org-file
-  - save current page in org
-- from emacs:
-  - manage tabs (MRU ordered by default)
-  - URL handler
-     - including the ability to route different urls to different browsers
-  - control a video playing
-  - babel support to execute in the current tab (or tab with specific id)
-  - the ability to create your own commands to interact with the browser
+- Features:
+  - from Emacs:
+    - manage tabs (MRU ordered by default)
+    - URL handler
+       - including the ability to route different urls to different browsers
+    - control a video playing
+    - babel support to execute in the current tab (or tab with specific id)
+    - the ability to create your own commands to interact with the browser
+  - extensible browser menu where you can request emacs to do something. currently:
+    - org-capture
+    - org-roam-capture
+    - save current transcript video
+    - save current video info
+    - save current chatGPT session to an org-file
+    - save current page in org
 
 I have created a video to introduce its features:
 
@@ -114,6 +110,12 @@ the short form.
 
 The popup should show ●  *Connected* within a few seconds.  If it
 does not, click *Reconnect*.
+
+You can pin it to the toolbar
+
+*Firefox will only load it until next restart*. Chrome will keep it
+permanently loaded.
+
 
 * Features
 
