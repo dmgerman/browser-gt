@@ -7,7 +7,7 @@
 ;; Maintainer: Daniel M. German <dmg@turingmachine.org>
 ;; Keywords: comm, tools, browser, org
 ;; URL: https://github.com/dmgerman/browser-gt
-;; Version: 0.94
+;; Version: 0.95
 ;; Package-Requires: ((emacs "27.1") (websocket "1.13") (org "9.8"))
 
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -75,7 +75,7 @@
 (declare-function org-roam-capture-    "ext:org-roam" (&rest args))
 (declare-function org-roam-node-create "ext:org-roam" (&rest args))
 
-(defconst browser-gt-version "0.94"
+(defconst browser-gt-version "0.95"
   "Current version of the browser-gt package.")
 
 ;;;###autoload
