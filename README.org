@@ -912,7 +912,7 @@ omitting =:client= signals an error and lists the connected names.
 
 ** Requirements
 
-- Emacs 27.1 or newer.
+- Emacs 30.1 or newer.
 - =websocket= package 1.13 or newer.
 - Org-mode 9.8 or newer (=browser-gt-youtube='s inline-image refresh
   calls =org-link-preview-region=, which replaced the obsoleted

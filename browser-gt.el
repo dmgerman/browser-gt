@@ -8,7 +8,7 @@
 ;; Keywords: comm, tools, browser, org
 ;; URL: https://github.com/dmgerman/browser-gt
 ;; Version: 0.95
-;; Package-Requires: ((emacs "27.1") (websocket "1.13") (org "9.8"))
+;; Package-Requires: ((emacs "30.1") (websocket "1.13") (org "9.8"))
 
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 ;;
