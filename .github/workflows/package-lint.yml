@@ -6,15 +6,17 @@ on:
       - '**.el'
       - '.github/workflows/package-lint.yml'
       - 'Makefile'
+      - 'Makefile.common'
   pull_request:
     paths:
       - '**.el'
       - '.github/workflows/package-lint.yml'
       - 'Makefile'
+      - 'Makefile.common'
 
 jobs:
   lint:
-    name: package-lint on Emacs ${{ matrix.emacs_version }}
+    name: check on Emacs ${{ matrix.emacs_version }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -33,6 +35,10 @@ jobs:
         with:
           version: ${{ matrix.emacs_version }}
 
+      - name: Run byte-compile via make
+        run: make compile
+        continue-on-error: ${{ matrix.allow-failure == true }}
+
       - name: Run package-lint via make
         run: make lint
         continue-on-error: ${{ matrix.allow-failure == true }}
@@ -43,4 +49,8 @@ jobs:
 
       - name: Run check-declare via make
         run: make check-declare
+        continue-on-error: ${{ matrix.allow-failure == true }}
+
+      - name: Run tests via make
+        run: make test
         continue-on-error: ${{ matrix.allow-failure == true }}
