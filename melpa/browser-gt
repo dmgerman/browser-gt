@@ -1,3 +1,6 @@
 (browser-gt
  :fetcher github
- :repo "dmgerman/browser-gt")
+ :repo "dmgerman/browser-gt"
+ :old-names (browsel)
+ )
+ 
