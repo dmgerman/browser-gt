@@ -5,9 +5,7 @@
 #+texinfo_dir_title: browser-gt: (browser-gt).
 #+texinfo_dir_desc: Bidirectional communication with the web browser including a tab manager.
 
-#+attr_org: :width 240
-#+attr_html: :width 240 :align center
-
+[[https://melpa.org/#/browser-gt][file:https://melpa.org/packages/browser-gt-badge.svg]]
 
 =browser-gt= is a module that allows Emacs and a Web browser to
 communicate with each other, in both directions.
