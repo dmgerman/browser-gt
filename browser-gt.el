@@ -1083,6 +1083,36 @@ fire spuriously after a quick reply."
        (message
         "Browser-gt: waiting on the browser -- if a per-tab consent overlay appeared, grant it to continue")))))
 
+;; ── Stale-target reporting ───────────────────────────────────────────────────
+;;
+;; Requests carry a tab id read earlier (a `GET_ALL_TABS' snapshot, an
+;; org-babel `:tab-id' header), and the tab may be gone by the time the
+;; request lands.  Most call sites read only the response's success
+;; fields, so such a request used to look like it had worked.
+
+(defconst browser-gt--stale-target-re
+  (rx (or (seq "no " (or "tab" "window") " with id " (+ digit))
+          "the target tab no longer exists"))
+  "Regexp matching an extension error about a tab or window that is gone.
+The wording comes from extension/src/stale-tab.js, which normalises
+Chrome's and Firefox's differing messages into this one; the two
+must be changed together.")
+
+(defun browser-gt--stale-target-message (response)
+  "Return RESPONSE's message when it reports a closed tab or window, else nil."
+  (let ((status (plist-get response :status))
+        (msg    (plist-get response :message)))
+    (and (equal status "error")
+         (stringp msg)
+         (string-match-p browser-gt--stale-target-re msg)
+         msg)))
+
+(defun browser-gt--warn-on-stale-target (name response)
+  "Warn when RESPONSE to request NAME reports a tab or window that is gone."
+  (let ((msg (browser-gt--stale-target-message response)))
+    (when msg
+      (browser-gt--warn "%s: %s" name msg))))
+
 (defun browser-gt-request-async (name payload callback &optional client)
   "Send a request NAME with PAYLOAD to the browser; invoke CALLBACK on response.
 CALLBACK receives the decoded response payload (a plist).  If the
@@ -1108,6 +1138,7 @@ invoked with a status:error payload and nil is returned."
             (wrapped    (lambda (response)
                           (when (timerp hint-timer)
                             (cancel-timer hint-timer))
+                          (browser-gt--warn-on-stale-target name response)
                           (funcall callback response)))
             (timer      (run-at-time (browser-gt--effective-timeout name) nil
                                      #'browser-gt--timeout-request id)))

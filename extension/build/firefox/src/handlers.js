@@ -23,31 +23,14 @@
 import { ensureConsent, tabHasConsent } from "./consent.js";
 import { evalAvailable, evalUnavailableMessage, evalInTab } from "./eval-impl.js";
 import { activeTabTimestamp } from "./focus-tracker.js";
+import {
+  assertTabExists,
+  clearLastError,
+  coerceTabId,
+  safeTabsCall,
+} from "./stale-tab.js";
 
 const api = (typeof browser !== "undefined") ? browser : chrome;
-
-// Firefox has a persistent quirk: when a `tabs.update' / `tabs.remove'
-// / `tabs.get' call rejects (e.g. "No tab with id: N" because the id
-// went stale between fetch and action), the underlying implementation
-// still stashes the error into `runtime.lastError' and nothing in the
-// Firefox path ever reads it — so the console gets an
-// "Unchecked runtime.lastError" line even though our own code
-// properly awaits the promise and catches the rejection.  This
-// wrapper explicitly touches `api.runtime.lastError' inside the
-// catch, which marks it as "checked" and silences that log; the
-// error is downgraded to a plain `console.warn' and re-thrown so
-// `dispatchEmacsRequest' can still send the failure payload back to
-// Emacs.  Use for every extension API call that a stale caller-side
-// id can invalidate.
-async function safeTabsCall(fn, what) {
-  try {
-    return await fn();
-  } catch (e) {
-    void api.runtime.lastError;
-    console.warn(`[handlers] ${what}: ${e?.message ?? e}`);
-    throw e;
-  }
-}
 
 // chrome.action.setIcon({path}) fails inside MV3 service workers
 // ("Failed to fetch") regardless of path correctness.  We build ImageData
@@ -77,7 +60,7 @@ async function syncTabIcon(tabId) {
     if (!iconCache[key]) iconCache[key] = await loadIconImageData(granted);
     await api.action.setIcon({ tabId, imageData: iconCache[key] });
   } catch {
-    // Tab may have closed; harmless.
+    clearLastError();          // tab may have closed; harmless
   }
 }
 
@@ -168,42 +151,54 @@ const SHAPE_ADAPTERS = {
   // known workarounds; combined they reliably bring the target window
   // to the front of Chrome's window order.
   async "focus-tab"(payload) {
-    if (!payload || typeof payload.id !== "number") {
+    if (!payload || payload.id === undefined) {
       throw new Error("focus-tab: payload.id (tab id) required");
     }
+    const id = coerceTabId(payload.id, "focus-tab");
     if (payload.focusWindow) {
       const tab = await safeTabsCall(
-        () => api.tabs.get(payload.id),
-        `tabs.get(${payload.id})`);
+        () => api.tabs.get(id),
+        `tabs.get(${id})`,
+        id);
       if (tab.windowId !== undefined) {
         await safeTabsCall(
           () => api.windows.update(tab.windowId, { focused: true }),
           `windows.update(${tab.windowId})`);
       }
       await safeTabsCall(
-        () => api.tabs.update(payload.id, { active: true }),
-        `tabs.update(${payload.id})`);
+        () => api.tabs.update(id, { active: true }),
+        `tabs.update(${id})`,
+        id);
+      // Second raise (see above).  Best-effort: the tab is active by
+      // now, so a window closing in between must not fail the request.
       if (tab.windowId !== undefined) {
-        await safeTabsCall(
-          () => api.windows.update(tab.windowId, { focused: true }),
-          `windows.update(${tab.windowId})`);
+        try {
+          await api.windows.update(tab.windowId, { focused: true });
+        } catch (e) {
+          clearLastError();
+          console.warn(`[browser-gt] re-focus windows.update(${tab.windowId}): ` +
+                       `${e?.message ?? e}`);
+        }
       }
     } else {
       await safeTabsCall(
-        () => api.tabs.update(payload.id, { active: true }),
-        `tabs.update(${payload.id})`);
+        () => api.tabs.update(id, { active: true }),
+        `tabs.update(${id})`,
+        id);
     }
     return { status: "ok" };
   },
 
   // { id: 123 } -> chrome.tabs.remove(123)
   async "tab-id"(payload) {
-    if (!payload || typeof payload.id !== "number") {
+    if (!payload || payload.id === undefined) {
       throw new Error("tab-id: payload.id required");
     }
+    const id = coerceTabId(payload.id, "tab-id");
     return await safeTabsCall(
-      () => api.tabs.remove(payload.id),
-      `tabs.remove(${payload.id})`);
+      () => api.tabs.remove(id),
+      `tabs.remove(${id})`,
+      id);
   },
 
   // GET_ALL_TABS with an accurate `lastAccessed' for active tabs.
@@ -252,11 +247,17 @@ const SHAPE_ADAPTERS = {
     if (!payload || typeof payload.code !== "string") {
       throw new Error("user-script: payload.code (string) required");
     }
+    // Check an Emacs-supplied id here: reaching the consent overlay
+    // with a closed tab used to report it as a page that cannot be
+    // scripted.
     let tabId = payload.tabId;
     if (tabId === undefined) {
       const [tab] = await api.tabs.query({ active: true, currentWindow: true });
       if (!tab) throw new Error("no active tab for user-script execution");
       tabId = tab.id;
+    } else {
+      tabId = coerceTabId(tabId, "user-script");
+      await assertTabExists(tabId);
     }
     if (!evalAvailable()) {
       throw new Error(evalUnavailableMessage());
@@ -267,11 +268,15 @@ const SHAPE_ADAPTERS = {
     // to granted (user clicked Allow 1h / Allow this tab in the overlay).
     // Sync the toolbar icon so the tab looks red right away.
     await syncTabIcon(tabId);
-    const result = await evalInTab({
-      tabId,
-      code:  payload.code,
-      world: payload.world ?? "USER_SCRIPT",
-    });
+    // The tab can still close while the consent overlay is up (30s).
+    const result = await safeTabsCall(
+      () => evalInTab({
+        tabId,
+        code:  payload.code,
+        world: payload.world ?? "USER_SCRIPT",
+      }),
+      `eval in tab ${tabId}`,
+      tabId);
     return { status: "ok", result };
   },
 };

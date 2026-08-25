@@ -43,6 +43,7 @@ SHARED_FILES := config.json \
                 src/identity.js \
                 src/focus-tracker.js \
                 src/handlers.js \
+                src/stale-tab.js \
                 src/payload.js \
                 src/consent.js \
                 src/popup.js \

@@ -40,6 +40,7 @@ import {
   tabHasConsent,
   CONSENT_DURATIONS,
 } from "./consent.js";
+import { clearLastError, safeTabsCall } from "./stale-tab.js";
 
 const api = (typeof browser !== "undefined") ? browser : chrome;
 
@@ -79,6 +80,7 @@ async function refreshTabIcon(tabId) {
     await api.action.setIcon({ tabId, imageData });
   } catch (e) {
     // Tab closed between consent change and icon update — harmless.
+    clearLastError();
     log("setIcon failed for", tabId, e?.message);
   }
 }
@@ -321,7 +323,10 @@ function installMessageRouter(transport) {
             const config = await ensureConfig();
             const menu   = findMenu(config, msg.menuId);
             if (!menu) throw new Error(`unknown menu: ${msg.menuId}`);
-            const tab     = await api.tabs.get(msg.tabId);
+            const tab     = await safeTabsCall(
+              () => api.tabs.get(msg.tabId),
+              `tabs.get(${msg.tabId})`,
+              msg.tabId);
             const message = await handleMenuClick(transport, menu, {}, tab);
             sendResponse({ ok: true, message });
           } catch (e) {
@@ -377,7 +382,10 @@ function installMessageRouter(transport) {
               .filter(([, entry]) => entry.expiry == null || entry.expiry > now);
             const tabs = (await Promise.all(candidates.map(async ([tabIdStr, entry]) => {
               const tabId = Number(tabIdStr);
-              const tab   = await api.tabs.get(tabId).catch(() => null);
+              const tab   = await api.tabs.get(tabId).catch(() => {
+                clearLastError();
+                return null;
+              });
               if (!tab) return null;
               return {
                 tabId,

@@ -41,6 +41,7 @@
 // Each handler returns an object suitable as the WS request payload.
 
 import { executeInTab } from "./executor.js";
+import { clearLastError, safeTabsCall, staleTabMessage } from "./stale-tab.js";
 
 const api = (typeof browser !== "undefined") ? browser : chrome;
 
@@ -73,6 +74,7 @@ async function readLinkTextInTab(tabId, linkUrl) {
       args: [linkUrl],
     })) ?? "";
   } catch (e) {
+    clearLastError();
     return "";
   }
 }
@@ -84,12 +86,13 @@ async function readSelectionInTab(tabId) {
       func: () => window.getSelection?.().toString() ?? "",
     })) ?? "";
   } catch (e) {
+    clearLastError();
     return "";
   }
 }
 
 async function extractMainHtml(tabId) {
-  const r = await executeInTab({
+  const r = await safeTabsCall(() => executeInTab({
     tabId,
     func: () => {
       const el = document.querySelector("main") ||
@@ -98,7 +101,7 @@ async function extractMainHtml(tabId) {
                  document.body;
       return { html: el.innerHTML.trim(), url: location.href, title: document.title };
     },
-  });
+  }), `extract main html from tab ${tabId}`, tabId);
   if (!r) throw new Error("could not extract page content");
   return r;
 }
@@ -118,8 +121,11 @@ function callTabMethod(tabId, method, extra) {
         const raw = api.runtime.lastError.message || "";
         const noReceiver = raw.includes("Could not establish connection")
                         || raw.includes("Receiving end does not exist");
+        const stale = staleTabMessage({ message: raw }, tabId);
         reject(new Error(
-          noReceiver
+          stale
+            ? `tab-message '${method}': ${stale}`
+            : noReceiver
             ? `tab-message '${method}': content script not loaded — ` +
               `reload the tab (Cmd-R / Ctrl-R) and try again`
             : `tab-message '${method}': ${raw}`

@@ -32,6 +32,7 @@
 // pruned the next time the popup queries / grants on that tab.
 
 import { executeInTab } from "./executor.js";
+import { safeTabsCall, staleTabMessage } from "./stale-tab.js";
 
 const CONSENT_KEY        = "consentByTab";
 const CODE_PREVIEW_CHARS = 800;
@@ -198,12 +199,17 @@ async function askConsent(tabId, fullCode) {
         ? fullCode.slice(0, CODE_PREVIEW_CHARS) + "\n…"
         : fullCode;
   try {
-    return await executeInTab({
-      tabId,
-      func: showConsentOverlay,
-      args: [preview, CONSENT_TIMEOUT_MS],
-    });
+    return await safeTabsCall(
+      () => executeInTab({
+        tabId,
+        func: showConsentOverlay,
+        args: [preview, CONSENT_TIMEOUT_MS],
+      }),
+      `consent overlay in tab ${tabId}`,
+      tabId);
   } catch (e) {
+    // A closed tab is not an unscriptable page; do not relabel it as one.
+    if (staleTabMessage(e, tabId)) throw e;
     throw new Error(
       `consent prompt could not be shown (${e?.message ?? e}); ` +
       `internal and store-managed pages cannot be evaluated`,
