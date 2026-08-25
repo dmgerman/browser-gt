@@ -1,6 +1,11 @@
 #+title: browser-gt — ChangeLog
 #+author: Daniel M. German
 
+* dmg-devel
+
+- Make sure the extensions handler errors gracefully and do not
+  crash on invalid input (e.g. tab no longer exists)
+
 * 0.95
 
 - Renamed the package from =browsel= to =browser-gt=.  This is a
