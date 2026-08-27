@@ -92,8 +92,10 @@ async function refreshAllTabIcons() {
 
 // ── Logging / notifications / badge ─────────────────────────────────────────
 
+// Epoch-millisecond prefix so these lines interleave with the Emacs
+// *browser-gt* timing log; see doc/latency-instrumentation.org.
 function log(...args) {
-  console.log("[core]", ...args);
+  console.log(`[${Date.now()}]`, "[core]", ...args);
 }
 
 function notify(message) {

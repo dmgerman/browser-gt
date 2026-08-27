@@ -39,7 +39,23 @@ const OFFSCREEN_URL = "html/offscreen.html";
 // updated by the WS_STATUS message handler below.
 let cachedStatus = "DISCONNECTED";
 
-function log(...args) { console.log("[bg]", ...args); }
+// Epoch-millisecond prefix so these lines interleave with the Emacs
+// *browser-gt* timing log; see doc/latency-instrumentation.org.
+function log(...args) { console.log(`[${Date.now()}]`, "[bg]", ...args); }
+
+// One line per Emacs-initiated request, reporting the same stage deltas
+// the Emacs advice prints.  Logged here as well because the Emacs side
+// only prints them for requests that crossed its slow threshold, and
+// because a request whose response never arrives leaves no Emacs line at
+// all.  `t3' is absent when dispatch threw before reaching the handler.
+function logTiming(request, timing) {
+  const t3 = timing.t3 ?? timing.t2;
+  log(`timing ${request?.name ?? "?"} id=${request?.id ?? "?"}`
+      + ` hop=${timing.t2 - timing.t1}ms`
+      + ` disp=${t3 - timing.t2}ms`
+      + ` api=${timing.t4 - t3}ms`
+      + ` t1=${timing.t1}`);
+}
 
 // ── Offscreen lifecycle ─────────────────────────────────────────────────────
 
@@ -123,7 +139,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     }
 
     case "WS_REQUEST": {
-      // See ai/slow-random-response-time.md.  Timing stamps ride
+      // See doc/latency-instrumentation.org.  Timing stamps ride
       // alongside every response so the Emacs-side advice can
       // attribute wall-clock cost to a specific stage (WS transport,
       // SW hop, dispatch, chrome.* API, return trip).
@@ -145,10 +161,12 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         .then(
           (payload) => {
             timing.t4 = Date.now();
+            logTiming(msg.request, timing);
             sendResponse({ payload: payload ?? { status: "ok" }, __timing: timing });
           },
           (e) => {
             timing.t4 = Date.now();
+            logTiming(msg.request, timing);
             log("emacs request failed:", e);
             sendResponse({ payload: { status: "error",
                                       message: e?.message ?? String(e) },
@@ -176,7 +194,14 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       // (the messaging APIs); getManifest is not part of that subset.
       // The SW reads it on offscreen's behalf so the version that
       // travels in CLIENT_HELLO is the same one the manifest carries.
-      sendResponse({ version: chrome.runtime.getManifest().version });
+      // `version_name' carries the release string Emacs matches against
+      // (`browser-gt-version').  Chrome's `version' field accepts only
+      // dot-separated integers, so a release like "0.95a" cannot live
+      // there; `version_name' has no such restriction.  Firefox's
+      // manifest takes the release string in `version' directly, so it
+      // has no `version_name' and falls through to `version'.
+      const manifest = chrome.runtime.getManifest();
+      sendResponse({ version: manifest.version_name ?? manifest.version });
       return false;
     }
 

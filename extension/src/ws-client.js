@@ -70,6 +70,20 @@ const DEFAULT_URL              = "ws://127.0.0.1:9130";
 const DEFAULT_RECONNECT_MS     = 5000;
 const DEFAULT_REQUEST_TIMEOUT  = 5000;
 
+// ── Diagnostic timing ────────────────────────────────────────────────────
+//
+// See doc/latency-instrumentation.org.  DEBUG_TIMING gates the drift
+// heartbeat below; it is the only periodic work this module does, so it
+// is the only thing worth a flag.  The timestamp prefix on `log' costs
+// nothing beyond what the surrounding frame logging already costs and
+// is always on.
+//
+// RESET TO false BEFORE CUTTING A RELEASE.  The heartbeat wakes the
+// socket host twice a second for the lifetime of the browser session.
+const DEBUG_TIMING       = true;
+const HEARTBEAT_MS       = 500;
+const DRIFT_THRESHOLD_MS = 200;
+
 export function startWebSocketClient(options) {
   if (!options || typeof options.clientName !== "string" || !options.clientName) {
     throw new Error("startWebSocketClient: options.clientName (string) required");
@@ -106,8 +120,37 @@ export function startWebSocketClient(options) {
   let incompatible   = false;
   const pending      = new Map();   // requestId → { resolve, reject, timer }
 
+  // Epoch milliseconds, not a formatted time: the Emacs side stamps its
+  // *browser-gt* timing lines the same way, from the same system clock,
+  // so lines from the two logs can be merged and compared directly.
   function log(...args) {
-    console.log(tag, ...args);
+    console.log(`[${Date.now()}]`, tag, ...args);
+  }
+
+  // The host of this socket is a page with no visible content — Chrome's
+  // offscreen document, or Firefox's background page.  Chrome lowers the
+  // priority of a renderer hosting no visible page, so an arriving frame
+  // can wait in the task queue before `onMessage' runs.  The Emacs side
+  // cannot see where the frame stopped and reports that wait as
+  // transport cost.
+  //
+  // A fixed-period timer that reports its own lateness exposes the stall
+  // without needing a request to provoke it.  Caveat when reading the
+  // output: browsers throttle timers in hidden pages by policy, so drift
+  // here is an upper bound on the problem, not a direct measurement of
+  // it.  The informative case is the disagreement — frames arriving late
+  // while drift stays near zero means task delivery, not scheduling, is
+  // the delay.
+  function startDriftHeartbeat() {
+    let expected = Date.now() + HEARTBEAT_MS;
+    setInterval(() => {
+      const now   = Date.now();
+      const drift = now - expected;
+      expected = now + HEARTBEAT_MS;
+      if (drift > DRIFT_THRESHOLD_MS) {
+        log(`event-loop drift ${drift}ms (heartbeat period ${HEARTBEAT_MS}ms)`);
+      }
+    }, HEARTBEAT_MS);
   }
 
   function setStatus(next) {
@@ -239,7 +282,7 @@ export function startWebSocketClient(options) {
       // target (currently Chrome) attach diagnostic timing to the wire
       // frame without polluting the payload shape — payloads may be
       // arrays or scalars where object-spreading `__timing' inside
-      // would corrupt the value.  See ai/slow-random-response-time.md.
+      // would corrupt the value.  See doc/latency-instrumentation.org.
       Promise.resolve()
         .then(() => options.onIncomingRequest(msg))
         .then(
@@ -325,5 +368,6 @@ export function startWebSocketClient(options) {
   function getStatus() { return status; }
 
   connect();
+  if (DEBUG_TIMING) startDriftHeartbeat();
   return { sendRequest, reconnect, getStatus };
 }

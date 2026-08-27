@@ -323,7 +323,7 @@ export async function dispatchEmacsRequest(request, handlers, timingOut) {
     if (!adapter) {
       throw new Error(`unknown args-shape: ${handler["args-shape"]}`);
     }
-    // See ai/slow-random-response-time.md.  `t3' is captured just
+    // See doc/latency-instrumentation.org.  `t3' is captured just
     // before the resolved handler runs; the caller stamps `t4' after
     // this function resolves.  Delta `t4 - t3' isolates the actual
     // chrome.* API call from surrounding dispatch overhead.

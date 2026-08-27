@@ -16,7 +16,9 @@
 
 import { startWebSocketClient } from "./ws-client.js";
 
-function log(...args) { console.log("[offscreen]", ...args); }
+// Epoch-millisecond prefix so these lines interleave with the Emacs
+// *browser-gt* timing log; see doc/latency-instrumentation.org.
+function log(...args) { console.log(`[${Date.now()}]`, "[offscreen]", ...args); }
 
 // Ask the service worker to dispatch one Emacs-initiated request and
 // resolve with the payload it returns.  The SW already has the
@@ -24,16 +26,23 @@ function log(...args) { console.log("[offscreen]", ...args); }
 // duplicating that, and the SW is alive whenever a frame arrives
 // (the WebSocket message wakes it).
 function dispatchIncomingViaServiceWorker(request) {
-  // See ai/slow-random-response-time.md.  `t1' marks the moment the
+  // See doc/latency-instrumentation.org.  `t1' marks the moment the
   // incoming request is observed at the offscreen document — the
   // earliest point the extension code can see it.  Forwarded to the
   // SW so `t2 - t1' isolates the offscreen -> SW hop (SW cold-start
   // signature).
   const t1 = Date.now();
+  log(`dispatch ${request?.name ?? "?"} id=${request?.id ?? "?"} t1=${t1}`);
   return new Promise((resolve, reject) => {
     chrome.runtime.sendMessage(
       { target: "service-worker", type: "WS_REQUEST", request, t1 },
       (response) => {
+        // Round trip as seen from here: SW wake-up, dispatch, the
+        // chrome.* call, and the reply coming back.  The SW reports the
+        // same interval broken down; a large difference between the two
+        // is messaging overhead this side cannot otherwise attribute.
+        log(`dispatched ${request?.name ?? "?"} id=${request?.id ?? "?"}`
+            + ` in ${Date.now() - t1}ms`);
         if (chrome.runtime.lastError) {
           reject(new Error(chrome.runtime.lastError.message));
           return;

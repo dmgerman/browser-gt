@@ -7,7 +7,7 @@
 ;; Maintainer: Daniel M. German <dmg@turingmachine.org>
 ;; Keywords: comm, tools, browser, org
 ;; URL: https://github.com/dmgerman/browser-gt
-;; Version: 0.94
+;; Version: 0.95a
 ;; Package-Requires: ((emacs "27.1") (websocket "1.13") (org "9.8"))
 
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -75,7 +75,7 @@
 (declare-function org-roam-capture-    "ext:org-roam" (&rest args))
 (declare-function org-roam-node-create "ext:org-roam" (&rest args))
 
-(defconst browser-gt-version "0.94"
+(defconst browser-gt-version "0.95a"
   "Current version of the browser-gt package.")
 
 ;;;###autoload
@@ -196,16 +196,28 @@ name (a string).  The client has already been removed from
 closes before CLIENT_HELLO ever completed the client had no
 assigned name and the hook is not run.")
 
-(defvar browser-gt-debug nil
-  "When non-nil, log every WebSocket frame to *browser-gt* buffer.")
+(defvar browser-gt-debug t
+  "When non-nil, log every WebSocket frame to *browser-gt* buffer.
 
-(defvar browser-gt-debug-timing nil
+Defaults to t while the latency investigation is open.  RESET THIS TO
+nil BEFORE CUTTING A RELEASE; see `doc/latency-instrumentation.org'.")
+
+(defvar browser-gt-debug-timing t
   "When non-nil, log per-stage latency breakdown for every slow request.
 Uses timing stamps attached to Chrome responses by the extension (see
-`ai/slow-random-response-time.md').  A request is considered slow when
+`doc/latency-instrumentation.org').  A request is considered slow when
 its total wall-clock time exceeds `browser-gt-slow-request-threshold'.
 When the flag is nil the advice still fires the slow-line message on
-slow requests but omits the per-stage breakdown.")
+slow requests but omits the per-stage breakdown.
+
+Also enables a `[timing]' line in the *browser-gt* buffer for every
+request sent and every response received, independently of
+`browser-gt-debug'.  The epoch milliseconds and request id in those
+lines match the extension console lines for the same request, so the
+two logs can be interleaved.
+
+Defaults to t while the latency investigation is open.  RESET THIS TO
+nil BEFORE CUTTING A RELEASE; see `doc/latency-instrumentation.org'.")
 
 (defvar browser-gt-slow-request-threshold 0.5
   "Seconds above which `browser-gt-request' logs a slow-line to *Messages*.
@@ -215,8 +227,16 @@ suppress the slow-line entirely.")
 (defvar browser-gt--last-response-timing nil
   "Timing plist from the most recent WebSocket response frame.
 Populated by `browser-gt--handle-response' from the wire-level
-`:__timing' field (see `ai/slow-random-response-time.md').  Read by
+`:__timing' field (see `doc/latency-instrumentation.org').  Read by
 `browser-gt--timing-advice'; not part of the public API.")
+
+(defvar browser-gt--last-send-time nil
+  "Float time at which the most recent request was handed to websocket.el.
+Set by `browser-gt-request-async' immediately before the frame is
+encoded and written.  Splits the interval the extension reports as
+`ws' into an Emacs-side setup part and a transport-plus-delivery
+part; without it a stall before the socket write is indistinguishable
+from one in the browser.  Not part of the public API.")
 
 (defvar browser-gt-pandoc-executable "pandoc"
   "Path to the pandoc executable used for HTML → org conversion.
@@ -319,6 +339,19 @@ the final fragment (FIN bit set) arrives or the client disconnects.")
     (with-current-buffer (get-buffer-create "*browser-gt*")
       (goto-char (point-max))
       (insert (format-time-string "[%H:%M:%S.%3N] ")
+              (apply #'format fmt args)
+              "\n"))))
+
+(defun browser-gt--timing-log (fmt &rest args)
+  "Append FMT formatted with ARGS to *browser-gt* when timing debug is enabled.
+Unlike `browser-gt--log' this is gated on `browser-gt-debug-timing'
+rather than `browser-gt-debug', and prefixes each line with epoch
+milliseconds so it can be interleaved with the extension console log,
+which stamps its lines from the same clock."
+  (when browser-gt-debug-timing
+    (with-current-buffer (get-buffer-create "*browser-gt*")
+      (goto-char (point-max))
+      (insert (format "[%.0f] [timing] " (* 1000.0 (float-time)))
               (apply #'format fmt args)
               "\n"))))
 
@@ -631,8 +664,9 @@ If no pending callback matches (likely already timed out), surfaces a warning."
         ;; Stash the wire-level :__timing (Chrome-only, may be nil) so
         ;; the sync `browser-gt-request' path can hand it to
         ;; `browser-gt--timing-advice' after the callback returns.
-        ;; See ai/slow-random-response-time.md.
+        ;; See doc/latency-instrumentation.org.
         (setq browser-gt--last-response-timing (plist-get msg :__timing))
+        (browser-gt--timing-log "RECV id=%s" id)
         (condition-case err
             (funcall callback (plist-get msg :payload))
           (error
@@ -1145,6 +1179,11 @@ invoked with a status:error payload and nil is returned."
        (setq browser-gt--pending-callbacks
              (cons (cons id (cons wrapped timer))
                    browser-gt--pending-callbacks))
+       ;; Stamp immediately before the write so the advice can report
+       ;; how much of the pre-arrival interval was spent here rather
+       ;; than in transport or in the browser's event loop.
+       (setq browser-gt--last-send-time (float-time))
+       (browser-gt--timing-log "SEND %s id=%s" name id)
        (browser-gt--send-to ws
                                `((id      . ,id)
                                  (name    . ,name)
@@ -1214,7 +1253,7 @@ roster."
 ;; ── Diagnostic timing advice ─────────────────────────────────────────────────
 ;;
 ;; Diagnostic scaffolding for the intermittent multi-second stalls
-;; documented in ai/slow-random-response-time.md.  The advice is
+;; documented in doc/latency-instrumentation.org.  The advice is
 ;; installed unconditionally but only emits a *Messages* line when the
 ;; observed wall-clock time exceeds `browser-gt-slow-request-threshold'.
 ;; When `browser-gt-debug-timing' is non-nil AND the extension attached a
@@ -1228,38 +1267,49 @@ roster."
 ;; `browser-gt--timing-advice', and the `advice-add' call below; drop the
 ;; matching setq in `browser-gt--handle-response'.
 
-(defun browser-gt--format-timing-deltas (t0-float timing dt-total)
+(defun browser-gt--format-timing-deltas (t0-float timing dt-total &optional send-float)
   "Return a one-line per-stage breakdown for TIMING or nil.
 T0-FLOAT is the pre-send `float-time' (seconds).  TIMING is the plist
 extracted from the response's `:__timing' field (`:t1' .. `:t4'
 in `Date.now' milliseconds; a Chrome-only field, may be nil).
 DT-TOTAL is the total wall-clock seconds already measured by the
 caller; the return-trip delta is derived as dt-total minus the
-sum of the other deltas so all five sum to the observed total."
+sum of the other deltas so all six sum to the observed total.
+
+SEND-FLOAT, when non-nil, is the `float-time' captured immediately
+before the frame was written (`browser-gt--last-send-time').  It
+splits what would otherwise be reported as one `ws' interval into
+`pre' (Emacs-side setup: id generation, timer arming) and `ws'
+(JSON encoding, the socket write, and the browser delivering the
+message event).  Without it a stall in Emacs before the write is
+reported as transport cost."
   (when timing
     (let* ((t0-ms (* 1000.0 t0-float))
+           (send-ms (and (numberp send-float) (* 1000.0 send-float)))
            (t1    (plist-get timing :t1))
            (t2    (plist-get timing :t2))
            (t3    (plist-get timing :t3))
            (t4    (plist-get timing :t4)))
       (when (and (numberp t1) (numberp t2) (numberp t3) (numberp t4))
-        (let* ((d-ws       (max 0 (- t1 t0-ms)))       ; t1 - t0
+        (let* ((d-pre      (if send-ms (max 0 (- send-ms t0-ms)) 0))
+               (d-ws       (max 0 (- t1 (or send-ms t0-ms))))
                (d-hop      (max 0 (- t2 t1)))          ; t2 - t1
                (d-dispatch (max 0 (- t3 t2)))          ; t3 - t2
                (d-api      (max 0 (- t4 t3)))          ; t4 - t3
                (d-return   (max 0 (- (* 1000.0 dt-total)
-                                     (+ d-ws d-hop d-dispatch d-api)))))
-          (format "[ws=%.0fms hop=%.0fms disp=%.0fms api=%.0fms ret=%.0fms]"
-                  d-ws d-hop d-dispatch d-api d-return))))))
+                                     (+ d-pre d-ws d-hop d-dispatch d-api)))))
+          (format "[pre=%.0fms ws=%.0fms hop=%.0fms disp=%.0fms api=%.0fms ret=%.0fms]"
+                  d-pre d-ws d-hop d-dispatch d-api d-return))))))
 
 (defun browser-gt--timing-advice (orig name &rest args)
   "Around advice on `browser-gt-request' that logs slow requests.
 ORIG is the original function, NAME the request name, ARGS the
-remaining args.  See ai/slow-random-response-time.md."
+remaining args.  See doc/latency-instrumentation.org."
   (let ((t0 (float-time))
         ;; Clear before the call so a stale value from a prior request
         ;; cannot leak into this one's breakdown.
-        (browser-gt--last-response-timing nil))
+        (browser-gt--last-response-timing nil)
+        (browser-gt--last-send-time nil))
     (unwind-protect
         (let ((result (apply orig name args)))
           (let* ((dt        (- (float-time) t0))
@@ -1268,7 +1318,8 @@ remaining args.  See ai/slow-random-response-time.md."
             (when slow?
               (let ((breakdown (and browser-gt-debug-timing
                                     (browser-gt--format-timing-deltas
-                                     t0 browser-gt--last-response-timing dt))))
+                                     t0 browser-gt--last-response-timing dt
+                                     browser-gt--last-send-time))))
                 (message "[browser-gt slow] %s took %.3fs @ %s%s"
                          name dt (format-time-string "%FT%T")
                          (if breakdown (concat " " breakdown) ""))))

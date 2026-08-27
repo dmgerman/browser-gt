@@ -6,6 +6,21 @@
 - Make sure the extensions handler errors gracefully and do not
   crash on invalid input (e.g. tab no longer exists)
 
+* 0.95a
+
+- Diagnostic release for the multi-second request stalls.  Latency
+  instrumentation now logs on both sides — per-stage deltas and an
+  event-loop drift heartbeat in the extension console, and a
+  correlatable per-request line in the =*browser-gt*= buffer.  A new
+  =pre= stage separates time spent in Emacs before the socket write
+  from time spent reaching the browser, which the previous breakdown
+  reported as one interval.  See =doc/latency-instrumentation.org=;
+  the debug switches default to ON in this release and must be turned
+  off before the next one.
+- The version string Emacs matches against is now taken from the
+  Chrome manifest's =version_name=, since Chrome's =version= accepts
+  only dot-separated integers.
+
 * 0.95
 
 - Renamed the package from =browsel= to =browser-gt=.  This is a

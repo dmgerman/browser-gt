@@ -40,7 +40,8 @@ const client = startWebSocketClient({
   clientName: "firefox",
   instance:   identity.instance,
   label:      identity.label,
-  version:    browser.runtime.getManifest().version,
+  version:    browser.runtime.getManifest().version_name
+              ?? browser.runtime.getManifest().version,
   onStatus:   setWsStatus,
   onIncompatible: (message) => {
     console.warn("[bg]", "version mismatch:", message);

@@ -21,7 +21,7 @@ const versionEl          = document.getElementById("version");
 // Show the extension's version next to the browser-gt title so a user
 // glancing at the popup can tell which build is loaded — matches
 // what the options page has always shown.
-versionEl.textContent = `v${api.runtime.getManifest().version}`;
+versionEl.textContent = `v${api.runtime.getManifest().version_name ?? api.runtime.getManifest().version}`;
 
 const LOGO_DEFAULT = "../icons/icon128.png";
 const LOGO_RED     = "../icons/icon-red-128.png";
