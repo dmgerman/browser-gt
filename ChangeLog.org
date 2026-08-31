@@ -3,8 +3,20 @@
 
 * dmg-devel
 
+* 0.95b
+
 - Make sure the extensions handler errors gracefully and do not
   crash on invalid input (e.g. tab no longer exists)
+- Latency instrumentation, second round.  The =api= stage used to
+  report one number for a handler that makes several browser calls;
+  sub-stage marks now name each one, so =OPEN_TAB= reports its tab
+  creation and its window raise separately.  Firefox reports timings
+  too, which is what makes the Chrome-versus-Firefox comparison
+  possible.  Every request writes its breakdown to =*browser-gt*=, not
+  only the slow ones, and =M-x browser-gt-timing-ping-start= probes
+  the connection on a timer so a stall no longer has to coincide with
+  someone using the browser.  Log lines on both sides now carry epoch
+  milliseconds and civil time.
 
 * 0.95a
 

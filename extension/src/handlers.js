@@ -64,7 +64,53 @@ async function syncTabIcon(tabId) {
   }
 }
 
+// ── Sub-stage marks ─────────────────────────────────────────────────────────
+//
+// The `api' segment of the Emacs breakdown is one number for the whole
+// shape adapter, and the adapters under suspicion make more than one
+// `chrome.*' call: `open-tab-focused' creates a tab and then raises its
+// window, `focus-tab' makes up to four calls.  One number cannot say
+// which of them was slow.
+//
+// A mark records the wall-clock end of one such call under a label.
+// Adapters receive `mark' as their third argument; the marks travel with
+// the rest of the timing object and are printed as `label=Nms' deltas,
+// each measured from the previous mark (the first from `t3').  Adapters
+// that make a single call need not mark anything: `api' already names it.
+//
+// See doc/latency-instrumentation.org.
+
+// Render the marks of one timing object as ` label=Nms` deltas, each
+// measured from the previous mark and the first from `t3'.  Empty string
+// when the adapter recorded none.  Lives here rather than in either
+// background script because both targets print it.
+export function formatMarks(timing) {
+  const marks = timing?.marks;
+  if (!Array.isArray(marks) || marks.length === 0) return "";
+  return marks.reduce(
+    (acc, m) => ({ prev: m.t,
+                   text: `${acc.text} ${m.label}=${m.t - acc.prev}ms` }),
+    { prev: timing.t3 ?? timing.t2, text: "" },
+  ).text;
+}
+
+function makeMark(timingOut) {
+  return (label) => {
+    if (!timingOut) return;
+    (timingOut.marks ??= []).push({ label, t: Date.now() });
+  };
+}
+
 const SHAPE_ADAPTERS = {
+  // Diagnostic no-op.  A PING exercises every stage of the round trip —
+  // socket, hop, dispatch, response — without touching a `chrome.*' API,
+  // so a stall it catches is scheduling or transport and cannot be the
+  // API's fault.  Emacs sends these on a timer while idle; see
+  // `browser-gt-timing-ping-start'.
+  async "ping"(payload) {
+    return { status: "ok", echo: payload ?? null };
+  },
+
   // { url: "..." } -> creates a tab in an incognito window.  If an
   // incognito window already exists for this profile, reuse it
   // (chrome.tabs.create + windowId).  Otherwise open a fresh
@@ -121,16 +167,19 @@ const SHAPE_ADAPTERS = {
   // the browser app to the OS foreground when the app is in the
   // background.  windows.update with focused:true does.  Returns the
   // created tab so callers see the same shape they used to.
-  async "open-tab-focused"(payload) {
+  async "open-tab-focused"(payload, _handler, mark = () => {}) {
     const args = payload && typeof payload === "object" ? payload : {};
     if (typeof args.url !== "string" || args.url.length === 0) {
       throw new Error("open-tab-focused: payload.url (string) required");
     }
     const tab = await api.tabs.create(args);
+    mark("create");
     if (tab && typeof tab.windowId === "number") {
       try {
         await api.windows.update(tab.windowId, { focused: true });
+        mark("raise");
       } catch (e) {
+        mark("raise-failed");
         // Best-effort: focus failure should not invalidate the
         // already-created tab.  Caller still gets a usable Tab.
       }
@@ -150,7 +199,7 @@ const SHAPE_ADAPTERS = {
   // it.  Focusing first + repeating the call are the two cheapest
   // known workarounds; combined they reliably bring the target window
   // to the front of Chrome's window order.
-  async "focus-tab"(payload) {
+  async "focus-tab"(payload, _handler, mark = () => {}) {
     if (!payload || payload.id === undefined) {
       throw new Error("focus-tab: payload.id (tab id) required");
     }
@@ -160,21 +209,26 @@ const SHAPE_ADAPTERS = {
         () => api.tabs.get(id),
         `tabs.get(${id})`,
         id);
+      mark("get");
       if (tab.windowId !== undefined) {
         await safeTabsCall(
           () => api.windows.update(tab.windowId, { focused: true }),
           `windows.update(${tab.windowId})`);
+        mark("raise");
       }
       await safeTabsCall(
         () => api.tabs.update(id, { active: true }),
         `tabs.update(${id})`,
         id);
+      mark("activate");
       // Second raise (see above).  Best-effort: the tab is active by
       // now, so a window closing in between must not fail the request.
       if (tab.windowId !== undefined) {
         try {
           await api.windows.update(tab.windowId, { focused: true });
+          mark("reraise");
         } catch (e) {
+          mark("reraise-failed");
           clearLastError();
           console.warn(`[browser-gt] re-focus windows.update(${tab.windowId}): ` +
                        `${e?.message ?? e}`);
@@ -185,6 +239,7 @@ const SHAPE_ADAPTERS = {
         () => api.tabs.update(id, { active: true }),
         `tabs.update(${id})`,
         id);
+      mark("activate");
     }
     return { status: "ok" };
   },
@@ -219,7 +274,7 @@ const SHAPE_ADAPTERS = {
   //
   // Non-active tabs pass through untouched: both browsers report
   // those correctly.
-  async "tabs-query-mru-safe"(payload) {
+  async "tabs-query-mru-safe"(payload, _handler, mark = () => {}) {
     // Emacs sends nil payload as the JSON-encoded keyword :null,
     // which arrives here as the string "null" (an Emacs
     // json-encode quirk).  Any non-object payload — null, "null",
@@ -232,11 +287,17 @@ const SHAPE_ADAPTERS = {
       ? payload
       : {};
     const tabs = await api.tabs.query(query);
-    return tabs.map((tab) => {
+    mark("query");
+    const out = tabs.map((tab) => {
       if (!tab.active) return tab;
       const ts = activeTabTimestamp(tab.windowId, tab.lastAccessed);
       return { ...tab, lastAccessed: ts };
     });
+    // Separates the API call from rewriting its result, which is O(tabs)
+    // and runs in the service worker.  With a hundred tabs open this is
+    // no longer obviously free.
+    mark("mru");
+    return out;
   },
 
   // { code: "..." } -> runtime-specific eval primitive in ./eval-impl.js.
@@ -328,7 +389,7 @@ export async function dispatchEmacsRequest(request, handlers, timingOut) {
     // this function resolves.  Delta `t4 - t3' isolates the actual
     // chrome.* API call from surrounding dispatch overhead.
     if (timingOut) timingOut.t3 = Date.now();
-    return await adapter(payload, handler);
+    return await adapter(payload, handler, makeMark(timingOut));
   }
 
   const fn   = resolveApi(handler.api);

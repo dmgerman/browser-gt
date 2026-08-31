@@ -29,6 +29,8 @@ import {
 } from "./core.js";
 import { readOrCreateIdentity } from "./identity.js";
 import { initFocusTracking } from "./focus-tracker.js";
+import { stamp } from "./log-stamp.js";
+import { formatMarks } from "./handlers.js";
 
 initFocusTracking();
 
@@ -39,9 +41,9 @@ const OFFSCREEN_URL = "html/offscreen.html";
 // updated by the WS_STATUS message handler below.
 let cachedStatus = "DISCONNECTED";
 
-// Epoch-millisecond prefix so these lines interleave with the Emacs
-// *browser-gt* timing log; see doc/latency-instrumentation.org.
-function log(...args) { console.log(`[${Date.now()}]`, "[bg]", ...args); }
+// Epoch-millisecond and civil-time prefix so these lines interleave with
+// the Emacs *browser-gt* timing log; see doc/latency-instrumentation.org.
+function log(...args) { console.log(`[${stamp()}]`, "[bg]", ...args); }
 
 // One line per Emacs-initiated request, reporting the same stage deltas
 // the Emacs advice prints.  Logged here as well because the Emacs side
@@ -54,6 +56,7 @@ function logTiming(request, timing) {
       + ` hop=${timing.t2 - timing.t1}ms`
       + ` disp=${t3 - timing.t2}ms`
       + ` api=${timing.t4 - t3}ms`
+      + formatMarks(timing)
       + ` t1=${timing.t1}`);
 }
 

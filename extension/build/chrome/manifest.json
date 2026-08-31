@@ -1,6 +1,6 @@
 {
   "name": "browser-gt (Emacs bridge)",
-  "version": "0.95.1",
+  "version": "0.95.2",
   "description": "Bidirectional WebSocket bridge between a WebExtension (Chrome or Firefox) and a running Emacs instance.",
   "options_ui": {
     "page": "html/options.html",
@@ -12,7 +12,7 @@
     "128": "icons/icon128.png"
   },
   "manifest_version": 3,
-  "version_name": "0.95a",
+  "version_name": "0.95b",
   "permissions": [
     "activeTab",
     "contextMenus",

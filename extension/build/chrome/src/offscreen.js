@@ -15,24 +15,31 @@
 // back up to the SW for handler dispatch.
 
 import { startWebSocketClient } from "./ws-client.js";
+import { stamp } from "./log-stamp.js";
 
-// Epoch-millisecond prefix so these lines interleave with the Emacs
-// *browser-gt* timing log; see doc/latency-instrumentation.org.
-function log(...args) { console.log(`[${Date.now()}]`, "[offscreen]", ...args); }
+// Epoch-millisecond and civil-time prefix so these lines interleave with
+// the Emacs *browser-gt* timing log; see doc/latency-instrumentation.org.
+function log(...args) { console.log(`[${stamp()}]`, "[offscreen]", ...args); }
 
 // Ask the service worker to dispatch one Emacs-initiated request and
 // resolve with the payload it returns.  The SW already has the
 // merged handler config; doing the dispatch here would require
 // duplicating that, and the SW is alive whenever a frame arrives
 // (the WebSocket message wakes it).
-function dispatchIncomingViaServiceWorker(request) {
+function dispatchIncomingViaServiceWorker(request, arrivedAt) {
   // See doc/latency-instrumentation.org.  `t1' marks the moment the
   // incoming request is observed at the offscreen document — the
-  // earliest point the extension code can see it.  Forwarded to the
-  // SW so `t2 - t1' isolates the offscreen -> SW hop (SW cold-start
-  // signature).
-  const t1 = Date.now();
-  log(`dispatch ${request?.name ?? "?"} id=${request?.id ?? "?"} t1=${t1}`);
+  // earliest point the extension code can see it.  ws-client passes it
+  // in from the socket's own message event; the fallback covers a
+  // caller that does not supply one.  Forwarded to the SW so `t2 - t1'
+  // isolates the offscreen -> SW hop (SW cold-start signature).
+  const t1 = arrivedAt ?? Date.now();
+  // `parse' is the interval this document spent between the socket
+  // event and handing the request off: JSON.parse plus the frame log.
+  // It is inside what Emacs reports as `ws' and is worth naming, since
+  // frame logging is on by default in this build.
+  log(`dispatch ${request?.name ?? "?"} id=${request?.id ?? "?"}`
+      + ` t1=${t1} parse=${Date.now() - t1}ms`);
   return new Promise((resolve, reject) => {
     chrome.runtime.sendMessage(
       { target: "service-worker", type: "WS_REQUEST", request, t1 },

@@ -66,6 +66,8 @@
 //
 // Returns { sendRequest, reconnect, getStatus }.
 
+import { stamp } from "./log-stamp.js";
+
 const DEFAULT_URL              = "ws://127.0.0.1:9130";
 const DEFAULT_RECONNECT_MS     = 5000;
 const DEFAULT_REQUEST_TIMEOUT  = 5000;
@@ -120,11 +122,12 @@ export function startWebSocketClient(options) {
   let incompatible   = false;
   const pending      = new Map();   // requestId → { resolve, reject, timer }
 
-  // Epoch milliseconds, not a formatted time: the Emacs side stamps its
-  // *browser-gt* timing lines the same way, from the same system clock,
-  // so lines from the two logs can be merged and compared directly.
+  // Epoch milliseconds followed by local civil time: the Emacs side
+  // stamps its *browser-gt* timing lines the same way, from the same
+  // system clock, so lines from the two logs can be merged and compared
+  // directly.  See src/log-stamp.js.
   function log(...args) {
-    console.log(`[${Date.now()}]`, tag, ...args);
+    console.log(`[${stamp()}]`, tag, ...args);
   }
 
   // The host of this socket is a page with no visible content — Chrome's
@@ -258,7 +261,9 @@ export function startWebSocketClient(options) {
   }
 
   function onMessage(event) {
-    handleFrame(event.data);
+    // Stamped here rather than inside `handleFrame' so it precedes the
+    // parse and the frame log, both of which are on the measured path.
+    handleFrame(event.data, Date.now());
   }
 
   function tryParse(text) {
@@ -269,7 +274,7 @@ export function startWebSocketClient(options) {
     }
   }
 
-  function handleFrame(text) {
+  function handleFrame(text, arrivedAt) {
     log("recv", text);
     const msg = tryParse(text);
     if (msg === null) return;
@@ -283,8 +288,14 @@ export function startWebSocketClient(options) {
       // frame without polluting the payload shape — payloads may be
       // arrays or scalars where object-spreading `__timing' inside
       // would corrupt the value.  See doc/latency-instrumentation.org.
+      //
+      // The arrival stamp is passed through as the second argument
+      // because this is the earliest point any extension code observes
+      // the frame; a target that stamps its own would include the parse
+      // and whatever the handler chain does before it, and would report
+      // that as transport cost.
       Promise.resolve()
-        .then(() => options.onIncomingRequest(msg))
+        .then(() => options.onIncomingRequest(msg, arrivedAt))
         .then(
           (result) => sendFrame(buildResponseFrame(msg.id, result)),
           (e) => sendFrame({ requestId: msg.id,

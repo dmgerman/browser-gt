@@ -7,7 +7,7 @@
 ;; Maintainer: Daniel M. German <dmg@turingmachine.org>
 ;; Keywords: comm, tools, browser, org
 ;; URL: https://github.com/dmgerman/browser-gt
-;; Version: 0.95a
+;; Version: 0.95b
 ;; Package-Requires: ((emacs "27.1") (websocket "1.13") (org "9.8"))
 
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -75,7 +75,7 @@
 (declare-function org-roam-capture-    "ext:org-roam" (&rest args))
 (declare-function org-roam-node-create "ext:org-roam" (&rest args))
 
-(defconst browser-gt-version "0.95a"
+(defconst browser-gt-version "0.95b"
   "Current version of the browser-gt package.")
 
 ;;;###autoload
@@ -338,20 +338,26 @@ the final fragment (FIN bit set) arrives or the client disconnects.")
   (when browser-gt-debug
     (with-current-buffer (get-buffer-create "*browser-gt*")
       (goto-char (point-max))
-      (insert (format-time-string "[%H:%M:%S.%3N] ")
+      (insert (format "[%.0f %s] "
+                      (* 1000.0 (float-time))
+                      (format-time-string "%FT%T.%3N"))
               (apply #'format fmt args)
               "\n"))))
 
 (defun browser-gt--timing-log (fmt &rest args)
   "Append FMT formatted with ARGS to *browser-gt* when timing debug is enabled.
 Unlike `browser-gt--log' this is gated on `browser-gt-debug-timing'
-rather than `browser-gt-debug', and prefixes each line with epoch
-milliseconds so it can be interleaved with the extension console log,
-which stamps its lines from the same clock."
+rather than `browser-gt-debug'.  Each line is prefixed with the same
+instant in two forms — epoch milliseconds, which subtracts without
+parsing, and local civil time to the millisecond, which is readable —
+so it can be interleaved with the extension console log, which stamps
+its lines from the same clock in the same two forms."
   (when browser-gt-debug-timing
     (with-current-buffer (get-buffer-create "*browser-gt*")
       (goto-char (point-max))
-      (insert (format "[%.0f] [timing] " (* 1000.0 (float-time)))
+      (insert (format "[%.0f %s] [timing] "
+                      (* 1000.0 (float-time))
+                      (format-time-string "%FT%T.%3N"))
               (apply #'format fmt args)
               "\n"))))
 
@@ -1267,6 +1273,31 @@ roster."
 ;; `browser-gt--timing-advice', and the `advice-add' call below; drop the
 ;; matching setq in `browser-gt--handle-response'.
 
+(defun browser-gt--format-timing-marks (timing t3)
+  "Return the sub-stage deltas of TIMING as \" label=Nms\" pairs, or \"\".
+T3 is the dispatch stamp the first mark is measured from; each later
+mark is measured from the one before it.
+
+Marks are recorded inside a shape adapter in the extension (see
+`extension/src/handlers.js').  They subdivide the `api' segment, which
+is otherwise a single number covering an adapter that may make several
+`chrome.*' calls: `OPEN_TAB' creates a tab and then raises its window,
+and only the marks say which of the two cost the time."
+  (let ((marks (plist-get timing :marks)))
+    (if (not (consp marks))
+        ""
+      (let ((acc (seq-reduce
+                  (lambda (state mark)
+                    (let ((label (plist-get mark :label))
+                          (tm    (plist-get mark :t)))
+                      (if (numberp tm)
+                          (cons tm (cons (format " %s=%.0fms" label (- tm (car state)))
+                                         (cdr state)))
+                        state)))
+                  marks
+                  (cons t3 nil))))
+        (apply #'concat (reverse (cdr acc)))))))
+
 (defun browser-gt--format-timing-deltas (t0-float timing dt-total &optional send-float)
   "Return a one-line per-stage breakdown for TIMING or nil.
 T0-FLOAT is the pre-send `float-time' (seconds).  TIMING is the plist
@@ -1298,8 +1329,9 @@ reported as transport cost."
                (d-api      (max 0 (- t4 t3)))          ; t4 - t3
                (d-return   (max 0 (- (* 1000.0 dt-total)
                                      (+ d-pre d-ws d-hop d-dispatch d-api)))))
-          (format "[pre=%.0fms ws=%.0fms hop=%.0fms disp=%.0fms api=%.0fms ret=%.0fms]"
-                  d-pre d-ws d-hop d-dispatch d-api d-return))))))
+          (format "[pre=%.0fms ws=%.0fms hop=%.0fms disp=%.0fms api=%.0fms ret=%.0fms%s]"
+                  d-pre d-ws d-hop d-dispatch d-api d-return
+                  (browser-gt--format-timing-marks timing t3)))))))
 
 (defun browser-gt--timing-advice (orig name &rest args)
   "Around advice on `browser-gt-request' that logs slow requests.
@@ -1314,20 +1346,118 @@ remaining args.  See doc/latency-instrumentation.org."
         (let ((result (apply orig name args)))
           (let* ((dt        (- (float-time) t0))
                  (threshold browser-gt-slow-request-threshold)
-                 (slow?     (and (numberp threshold) (> dt threshold))))
+                 (slow?     (and (numberp threshold) (> dt threshold)))
+                 (breakdown (and browser-gt-debug-timing
+                                 (browser-gt--format-timing-deltas
+                                  t0 browser-gt--last-response-timing dt
+                                  browser-gt--last-send-time))))
+            ;; Every request, not only the slow ones: an intermittent
+            ;; stall is only interpretable against what the same request
+            ;; costs the rest of the time, and the fast lines are what
+            ;; establish that baseline.  *Messages* still sees only the
+            ;; outliers.
+            (browser-gt--timing-log "DONE %s %.3fs%s" name dt
+                                    (if breakdown (concat " " breakdown) ""))
             (when slow?
-              (let ((breakdown (and browser-gt-debug-timing
-                                    (browser-gt--format-timing-deltas
-                                     t0 browser-gt--last-response-timing dt
-                                     browser-gt--last-send-time))))
-                (message "[browser-gt slow] %s took %.3fs @ %s%s"
-                         name dt (format-time-string "%FT%T")
-                         (if breakdown (concat " " breakdown) ""))))
+              (message "[browser-gt slow] %s took %.3fs @ %.0f %s%s"
+                       name dt (* 1000.0 (float-time))
+                       (format-time-string "%FT%T.%3N")
+                       (if breakdown (concat " " breakdown) "")))
             result))
       ;; Ensure the stash does not linger past this call even on error.
       (setq browser-gt--last-response-timing nil))))
 
 (advice-add 'browser-gt-request :around #'browser-gt--timing-advice)
+
+;; ── Idle probe ───────────────────────────────────────────────────────────────
+;;
+;; The stall is intermittent and so far has only been observed on
+;; requests the user happened to make, which means the record of it
+;; starts when someone notices.  A PING on a timer removes that
+;; dependency: it runs the full round trip — socket, hop, dispatch,
+;; response — against a handler that touches no `chrome.*' API, so
+;; anything it measures is scheduling or transport and cannot be blamed
+;; on the API.  Every probe writes a line to *browser-gt*, so the buffer
+;; holds a continuous latency record rather than isolated samples.
+;;
+;; Off by default, and not merely to save the traffic: on Chrome MV3 an
+;; arriving frame resets the service worker's idle timer, so a probe
+;; frequent enough to be useful keeps the worker permanently alive.
+;; While it runs, `hop' will read near zero because the cold start it
+;; measures can no longer happen.  Request timings collected with the
+;; probe on are therefore not comparable with timings collected without
+;; it.  Turn it on to catch a stall, off to measure a cold start.
+
+(defvar browser-gt-timing-ping-interval 30
+  "Seconds between diagnostic PING probes started by
+`browser-gt-timing-ping-start'.  See the commentary above that
+function for why a short interval changes what the other timings mean.")
+
+(defvar browser-gt--timing-ping-timer nil
+  "Repeat timer running the diagnostic probe, or nil.  Not public API.")
+
+(defun browser-gt--timing-ping-send (client)
+  "Send one diagnostic PING to CLIENT and log its round trip.
+The per-stage breakdown is read from the dynamic stash the response
+handler fills in, so a request from elsewhere that lands between this
+probe's send and its response can be credited to the probe's `pre'.
+The stage the probe exists to measure — everything from the write to
+the extension's reply — is unaffected by that."
+  (let ((t0 (float-time)))
+    (browser-gt-request-async
+     "PING" '(:probe t)
+     (lambda (response)
+       (let* ((dt      (- (float-time) t0))
+              (err     (and (equal (plist-get response :status) "error")
+                            (plist-get response :message)))
+              (deltas  (browser-gt--format-timing-deltas
+                        t0 browser-gt--last-response-timing dt
+                        browser-gt--last-send-time)))
+         (browser-gt--timing-log "PING %s %.3fs%s%s"
+                                 client dt
+                                 (if deltas (concat " " deltas) "")
+                                 (if err (format " error=%s" err) ""))
+         (when (and (numberp browser-gt-slow-request-threshold)
+                    (> dt browser-gt-slow-request-threshold))
+           (message "[browser-gt slow] PING(%s) took %.3fs @ %.0f %s%s"
+                    client dt (* 1000.0 (float-time))
+                    (format-time-string "%FT%T.%3N")
+                    (if deltas (concat " " deltas) "")))))
+     client)))
+
+(defun browser-gt--timing-ping-tick ()
+  "Probe every connected client once."
+  (dolist (client (browser-gt-connected-clients))
+    (browser-gt--timing-ping-send client)))
+
+;;;###autoload
+(defun browser-gt-timing-ping-start (&optional interval)
+  "Probe each connected client every INTERVAL seconds and log the round trip.
+INTERVAL defaults to `browser-gt-timing-ping-interval'.  Interactively
+with a prefix argument, read it from the minibuffer.  Stop with
+`browser-gt-timing-ping-stop'.
+
+Diagnostic scaffolding; see doc/latency-instrumentation.org, and note
+that while this runs the service worker never idles out, so `hop' stops
+reporting cold starts."
+  (interactive
+   (list (when current-prefix-arg
+           (read-number "Probe interval (seconds): "
+                        browser-gt-timing-ping-interval))))
+  (browser-gt-timing-ping-stop)
+  (let ((secs (or interval browser-gt-timing-ping-interval)))
+    (setq browser-gt--timing-ping-timer
+          (run-at-time secs secs #'browser-gt--timing-ping-tick))
+    (message "browser-gt: probing every %ss; results in *browser-gt*" secs)))
+
+;;;###autoload
+(defun browser-gt-timing-ping-stop ()
+  "Stop the diagnostic probe started by `browser-gt-timing-ping-start'."
+  (interactive)
+  (when (timerp browser-gt--timing-ping-timer)
+    (cancel-timer browser-gt--timing-ping-timer)
+    (message "browser-gt: probe stopped"))
+  (setq browser-gt--timing-ping-timer nil))
 
 ;; ── Convenience: respond-fast-then-defer ─────────────────────────────────────
 
