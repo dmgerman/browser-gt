@@ -26,8 +26,9 @@ versionEl.textContent = `v${api.runtime.getManifest().version_name ?? api.runtim
 const LOGO_DEFAULT = "../icons/icon128.png";
 const LOGO_RED     = "../icons/icon-red-128.png";
 
-// Storage keys — must match identity.js and options.js.
-const IDENTITY_LABEL_KEY    = "browser-gt-label";
+// Storage key — must match identity.js and options.js.  The label key
+// is deliberately not read here: the popup reports the name Emacs
+// assigned, not the input the user gave to that decision.
 const IDENTITY_INSTANCE_KEY = "browser-gt-instance";
 
 function isConsentLive(info) {
@@ -39,7 +40,11 @@ function setLogoForConsent(info) {
   logoEl.src = isConsentLive(info) ? LOGO_RED : LOGO_DEFAULT;
 }
 
-function setStatus(status) {
+// CLIENT is the name Emacs registered this client under, known only
+// once the CLIENT_HELLO reply has arrived.  Anything short of a live
+// registration leaves the identity block saying "Disconnected" rather
+// than naming a client Emacs cannot currently address.
+function setStatus(status, client = null) {
   dot.className = "dot " + (status?.toLowerCase() ?? "disconnected");
   const label = {
     CONNECTED:    "Connected",
@@ -48,6 +53,10 @@ function setStatus(status) {
     INCOMPATIBLE: "Version mismatch — rebuild and reload",
   }[status] ?? "Unknown";
   statusText.textContent = label;
+
+  const named = status === "CONNECTED" && typeof client === "string" && client;
+  identityNameEl.textContent     = named ? client : "Disconnected";
+  identityNameHintEl.textContent = named ? "" : "(not registered with Emacs)";
 }
 
 function setMessage(text, isError = false) {
@@ -331,29 +340,28 @@ async function applyShortcutHints() {
 
 // ── Identity block (name + uuid) ────────────────────────────────────────────
 //
-// Reads the storage keys populated by src/identity.js and shows the
-// name Emacs will see plus the persistent instance UUID.  When the
-// label is unset, the effective name is the build's clientName —
-// detected via the `browser` global (Firefox exposes it natively;
-// Chrome does not, absent a polyfill).  This is the same heuristic
-// the top-of-file `api` picker uses, so the popup stays consistent
-// with itself.
+// The name is Emacs's to assign, not ours to predict: a collision with
+// another connected client appends an instance suffix, and an unlabeled
+// install can be given a name remembered from a previous session.  So
+// the popup shows what Emacs answered in the CLIENT_HELLO reply,
+// forwarded here by `setStatus' below, and shows nothing at all when
+// there is no live registration.  The label in storage is only an input
+// to that decision; it is edited on the options page.
+//
+// It used to derive the name locally from `typeof browser !==
+// "undefined"', reading a defined `browser' as "this is Firefox".
+// Chrome now defines that name too, as an alias for `chrome', so the
+// test reported Firefox on both builds.  Nothing infers the browser
+// from a global any more; where the distinction is still needed (the
+// two hints below) it comes from the extension's own URL scheme, which
+// the engine fixes and no polyfill can shadow.
 
-const IS_FIREFOX          = typeof browser !== "undefined";
-const DEFAULT_CLIENT_NAME = IS_FIREFOX ? "firefox" : "chrome";
+const IS_FIREFOX = api.runtime.getURL("").startsWith("moz-extension://");
 
 async function renderIdentity() {
-  const stored = await api.storage.local.get([IDENTITY_LABEL_KEY,
-                                              IDENTITY_INSTANCE_KEY]);
-  const label    = stored[IDENTITY_LABEL_KEY];
-  const instance = stored[IDENTITY_INSTANCE_KEY];
-  const isLabelSet = typeof label === "string" && label.length > 0;
-
-  identityNameEl.textContent = isLabelSet ? label : DEFAULT_CLIENT_NAME;
-  identityNameHintEl.textContent = isLabelSet
-    ? ""
-    : "(default — set a label to run multiple)";
-  identityUuidEl.textContent = instance || IDENTITY_MISSING_MESSAGE;
+  const stored = await api.storage.local.get([IDENTITY_INSTANCE_KEY]);
+  identityUuidEl.textContent =
+    stored[IDENTITY_INSTANCE_KEY] || IDENTITY_MISSING_MESSAGE;
 }
 
 // The UUID lands in storage the first time the background page (Firefox)
@@ -372,7 +380,7 @@ const IDENTITY_MISSING_MESSAGE = IS_FIREFOX
 
 api.runtime.onMessage.addListener((msg) => {
   if (msg?.target !== "popup") return false;
-  if (msg.type === "WS_STATUS") setStatus(msg.status);
+  if (msg.type === "WS_STATUS") setStatus(msg.status, msg.client);
   return false;
 });
 
@@ -412,6 +420,10 @@ function showSwFailed() {
   swErrorEl.style.display = "block";
   dot.className        = "dot incompatible";
   statusText.textContent = "Extension not loaded";
+  // This path bypasses `setStatus', so clear the identity name here too
+  // rather than leaving the placeholder from the markup.
+  identityNameEl.textContent     = "Disconnected";
+  identityNameHintEl.textContent = "(not registered with Emacs)";
 }
 
 // On open, query the current status.  Route the "SW not running" case
@@ -421,7 +433,7 @@ sendToBackground({ target: "service-worker", type: "WS_STATUS_QUERY" })
     if (isSwNotRunning(r)) {
       showSwFailed();
     } else {
-      setStatus(r?.status ?? "DISCONNECTED");
+      setStatus(r?.status ?? "DISCONNECTED", r?.client);
     }
   });
 

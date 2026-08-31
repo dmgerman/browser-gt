@@ -101,5 +101,6 @@ initRouter({
     client.reconnect();
     return { ok: true };
   },
-  getStatus:   () => client.getStatus(),
+  getStatus:   () => ({ status: client.getStatus(),
+                        client: client.getClientName() }),
 });

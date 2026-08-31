@@ -108,9 +108,10 @@ const client = startWebSocketClient({
   instance,
   label,
   version,
-  onStatus: (status) => {
+  onStatus: (status, clientName) => {
     chrome.runtime
-      .sendMessage({ target: "service-worker", type: "WS_STATUS", status })
+      .sendMessage({ target: "service-worker", type: "WS_STATUS",
+                     status, client: clientName ?? null })
       .catch(() => {});
   },
   onIncompatible: (message) => {
@@ -126,7 +127,8 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (!msg || msg.target !== "offscreen") return false;
   switch (msg.type) {
     case "WS_STATUS_QUERY":
-      sendResponse({ status: client.getStatus() });
+      sendResponse({ status: client.getStatus(),
+                     client: client.getClientName() });
       return false;
 
     case "WS_RECONNECT":

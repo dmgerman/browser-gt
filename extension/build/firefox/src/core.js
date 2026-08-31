@@ -19,15 +19,20 @@
 //   transport.sendRequest(name, payload)  → Promise<replyPayload>
 //                                            (throws on error)
 //   transport.reconnect()                 → Promise<{ ok }>
-//   transport.getStatus()                 → "CONNECTED"/"CONNECTING"/
-//                                            "DISCONNECTED", or a
+//   transport.getStatus()                 → { status, client }, or a
 //                                            Promise resolving to one
 //                                            (Chrome pulls through to
-//                                            the offscreen document)
+//                                            the offscreen document).
+//                                            `status' is "CONNECTED"/
+//                                            "CONNECTING"/"DISCONNECTED"/
+//                                            "INCOMPATIBLE"; `client' is
+//                                            the name Emacs assigned in
+//                                            its CLIENT_HELLO reply, or
+//                                            null when unregistered
 //
-// The per-target background also calls `setWsStatus(status)` when the
-// WebSocket state changes, so the popup and the SW (Chrome) or the
-// background page (Firefox) see the same value.  Incoming Emacs
+// The per-target background also calls `setWsStatus(status, client)'
+// when the WebSocket state changes, so the popup and the SW (Chrome) or
+// the background page (Firefox) see the same value.  Incoming Emacs
 // requests are dispatched via `dispatchIncomingEmacsRequest(request)`
 // which the per-target code wires into its WebSocket frame handler.
 
@@ -125,6 +130,7 @@ const badgeError     = (message) => { badge("!", "#c33", 5000); notify(message);
 let cachedConfig    = null;
 let refreshInFlight = null;
 let wsStatus        = "DISCONNECTED";
+let wsClientName    = null;
 
 async function loadBundledConfig() {
   try {
@@ -250,13 +256,20 @@ async function handleCommand(transport, command) {
 
 // ── Status broadcasting ─────────────────────────────────────────────────────
 
-export function setWsStatus(next) {
-  if (wsStatus === next) return;
-  wsStatus = next;
-  log("ws status:", wsStatus);
+// CLIENT is the name Emacs assigned, or null.  It arrives after the
+// status reaches CONNECTED — the hello is only sent once the socket is
+// open — so a change in the name alone must still broadcast, otherwise
+// an open popup would keep showing "Disconnected" for a client that is
+// registered.
+export function setWsStatus(next, client = null) {
+  if (wsStatus === next && wsClientName === client) return;
+  wsStatus     = next;
+  wsClientName = client;
+  log("ws status:", wsStatus, wsClientName ? `as ${wsClientName}` : "");
   // Best-effort broadcast to popup; no-op if popup is closed.
   api.runtime
-    .sendMessage({ target: "popup", type: "WS_STATUS", status: wsStatus })
+    .sendMessage({ target: "popup", type: "WS_STATUS",
+                   status: wsStatus, client: wsClientName })
     .catch(() => {});
 }
 
@@ -279,12 +292,13 @@ function installMessageRouter(transport) {
       case "WS_STATUS_QUERY": {
         // transport.getStatus() may return a Promise (Chrome's
         // pull-through to the offscreen document); Promise.resolve
-        // also accepts the sync string Firefox returns.  On rejection
+        // also accepts the sync object Firefox returns.  On rejection
         // fall back to the last broadcast value so the popup is not
         // forced to "Disconnected" by a transient round-trip failure.
         Promise.resolve(transport.getStatus()).then(
-          (status) => sendResponse({ status }),
-          ()       => sendResponse({ status: wsStatus }),
+          (r)  => sendResponse({ status: r?.status ?? wsStatus,
+                                 client: r?.client ?? null }),
+          ()   => sendResponse({ status: wsStatus, client: wsClientName }),
         );
         return true;
       }

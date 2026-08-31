@@ -43,9 +43,16 @@
 //                             or it rejects the hello and the
 //                             connection enters the terminal
 //                             INCOMPATIBLE state.
-//   options.onStatus          (status) → void.  Called on every change
+//   options.onStatus          (status, clientName) → void.  Called on
+//                             every change
 //                             of "CONNECTING" / "CONNECTED" /
-//                             "DISCONNECTED" / "INCOMPATIBLE".  The
+//                             "DISCONNECTED" / "INCOMPATIBLE", and
+//                             again when the CLIENT_HELLO reply names
+//                             this client (the status is CONNECTED by
+//                             then, so no status change accompanies
+//                             it).  `clientName' is the name Emacs
+//                             assigned, or null whenever there is no
+//                             live registration.  The
 //                             INCOMPATIBLE state is terminal: the
 //                             socket is closed and no reconnect is
 //                             attempted until reconnect() is called
@@ -64,7 +71,7 @@
 //   options.reconnectMs       Reconnect delay in ms.  Default 5000.
 //   options.requestTimeoutMs  Per-request timeout in ms.  Default 5000.
 //
-// Returns { sendRequest, reconnect, getStatus }.
+// Returns { sendRequest, reconnect, getStatus, getClientName }.
 
 import { stamp } from "./log-stamp.js";
 
@@ -120,6 +127,14 @@ export function startWebSocketClient(options) {
   // reconnect.  An explicit reconnect() call clears it so the user can
   // recover after rebuilding both sides.
   let incompatible   = false;
+  // The name Emacs assigned in its CLIENT_HELLO reply, or null when
+  // this client is not currently registered there.  Emacs owns it: the
+  // name it returns can differ from `displayName' below, because a
+  // collision with another connected client appends an instance
+  // suffix, and because an unlabeled install can be given a name
+  // remembered from a previous session.  Deliberately not persisted —
+  // it is a property of this connection, not of this install.
+  let clientName     = null;
   const pending      = new Map();   // requestId → { resolve, reject, timer }
 
   // Epoch milliseconds followed by local civil time: the Emacs side
@@ -156,11 +171,15 @@ export function startWebSocketClient(options) {
     }, HEARTBEAT_MS);
   }
 
+  function notifyStatus() {
+    try { options.onStatus(status, clientName); }
+    catch (e) { log("onStatus threw:", e); }
+  }
+
   function setStatus(next) {
     if (status === next) return;
     status = next;
-    try { options.onStatus(status); }
-    catch (e) { log("onStatus threw:", e); }
+    notifyStatus();
   }
 
   function clearReconnect() {
@@ -181,6 +200,7 @@ export function startWebSocketClient(options) {
                ws.readyState === WebSocket.CONNECTING)) {
       return;
     }
+    clientName = null;
     setStatus("CONNECTING");
     log("connecting to", url);
     try {
@@ -227,13 +247,22 @@ export function startWebSocketClient(options) {
         const message = reply.message ?? "CLIENT_HELLO rejected";
         log("incompatible:", message);
         incompatible = true;
+        clientName = null;
         try { options.onIncompatible?.(message); }
         catch (e) { log("onIncompatible threw:", e); }
         setStatus("INCOMPATIBLE");
         try { ws.close(); } catch (e) { /* already closing */ }
         return;
       }
-      log("CLIENT_HELLO acknowledged as", reply?.client ?? displayName);
+      // Emacs answers with the name it registered us under.  Report it
+      // to the host: the status is already CONNECTED, so `setStatus'
+      // would suppress the notification and the popup would keep
+      // showing whatever it had before the hello completed.
+      clientName = (typeof reply?.client === "string" && reply.client)
+        ? reply.client
+        : null;
+      notifyStatus();
+      log("CLIENT_HELLO acknowledged as", clientName ?? displayName);
     } catch (e) {
       log("CLIENT_HELLO failed:", e?.message ?? e);
     }
@@ -241,6 +270,9 @@ export function startWebSocketClient(options) {
 
   function onClose() {
     log("closed");
+    // The registration died with the socket; Emacs will assign a name
+    // again on the next hello, not necessarily the same one.
+    clientName = null;
     for (const [id, p] of pending) {
       clearTimeout(p.timer);
       p.reject(new Error("WebSocket closed before response"));
@@ -378,7 +410,9 @@ export function startWebSocketClient(options) {
 
   function getStatus() { return status; }
 
+  function getClientName() { return clientName; }
+
   connect();
   if (DEBUG_TIMING) startDriftHeartbeat();
-  return { sendRequest, reconnect, getStatus };
+  return { sendRequest, reconnect, getStatus, getClientName };
 }

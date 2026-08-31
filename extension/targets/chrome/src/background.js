@@ -36,10 +36,12 @@ initFocusTracking();
 
 const OFFSCREEN_URL = "html/offscreen.html";
 
-// Last status pushed up from the offscreen page.  Used as a fallback
-// when the pull-through `transport.getStatus` cannot reach offscreen;
-// updated by the WS_STATUS message handler below.
+// Last status pushed up from the offscreen page, and the name Emacs
+// assigned in its CLIENT_HELLO reply (null when unregistered).  Used as
+// a fallback when the pull-through `transport.getStatus` cannot reach
+// offscreen; updated by the WS_STATUS message handler below.
 let cachedStatus = "DISCONNECTED";
+let cachedClient = null;
 
 // Epoch-millisecond and civil-time prefix so these lines interleave with
 // the Emacs *browser-gt* timing log; see doc/latency-instrumentation.org.
@@ -116,12 +118,13 @@ const transport = {
       const r = await offscreenSend({ type: "WS_STATUS_QUERY" });
       if (r?.status) {
         cachedStatus = r.status;
-        return r.status;
+        cachedClient = r.client ?? null;
+        return { status: cachedStatus, client: cachedClient };
       }
     } catch (e) {
       log("status query to offscreen failed:", e?.message ?? e);
     }
-    return cachedStatus;
+    return { status: cachedStatus, client: cachedClient };
   },
 };
 
@@ -137,7 +140,8 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   switch (msg.type) {
     case "WS_STATUS": {
       cachedStatus = msg.status;
-      setWsStatus(msg.status);
+      cachedClient = msg.client ?? null;
+      setWsStatus(msg.status, cachedClient);
       return false;
     }
 
