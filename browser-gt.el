@@ -1311,7 +1311,7 @@ SEND-FLOAT, when non-nil, is the `float-time' captured immediately
 before the frame was written (`browser-gt--last-send-time').  It
 splits what would otherwise be reported as one `ws' interval into
 `pre' (Emacs-side setup: id generation, timer arming) and `ws'
-(JSON encoding, the socket write, and the browser delivering the
+\(JSON encoding, the socket write, and the browser delivering the
 message event).  Without it a stall in Emacs before the write is
 reported as transport cost."
   (when timing
@@ -1389,9 +1389,10 @@ remaining args.  See doc/latency-instrumentation.org."
 ;; it.  Turn it on to catch a stall, off to measure a cold start.
 
 (defvar browser-gt-timing-ping-interval 30
-  "Seconds between diagnostic PING probes started by
-`browser-gt-timing-ping-start'.  See the commentary above that
-function for why a short interval changes what the other timings mean.")
+  "Seconds between diagnostic PING probes.
+The probes are started by `browser-gt-timing-ping-start'.  See the
+commentary above that function for why a short interval changes what
+the other timings mean.")
 
 (defvar browser-gt--timing-ping-timer nil
   "Repeat timer running the diagnostic probe, or nil.  Not public API.")
