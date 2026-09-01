@@ -75,8 +75,48 @@ Obtain one at https://console.cloud.google.com/ and set this variable.")
 (defvar browser-gt-youtube-transcript-dir "~/sync/youtube"
   "Directory where YouTube transcript org files are saved.")
 
-(defvar browser-gt-youtube-transcript-yt-dlp-executable "yt-dlp"
-  "Path to the yt-dlp executable.")
+(defgroup browser-gt-youtube nil
+  "Capture YouTube videos and transcripts from the browser."
+  :group 'applications
+  :prefix "browser-gt-youtube-")
+
+(defcustom browser-gt-youtube-transcript-yt-dlp-executable "yt-dlp"
+  "Path to the yt-dlp executable."
+  :type 'string
+  :group 'browser-gt-youtube)
+
+;; The two templates below hold a complete yt-dlp command line each,
+;; including where the URL sits.  Strings are passed through untouched;
+;; the symbols `url', `lang' and `output' are replaced with the values
+;; for the call at hand (see `browser-gt-youtube--yt-dlp-args').  Any
+;; other symbol is an error.  Keeping the whole line in one place means
+;; a future yt-dlp option rename is a change to a variable rather than
+;; to the call sites, and it lets a user add options a local yt-dlp
+;; needs, such as cookies or a proxy.
+
+(defcustom browser-gt-youtube-transcript-info-args
+  '("-J" "--no-playlist" url)
+  "Command line passed to yt-dlp to fetch video metadata as JSON.
+The output must be JSON on standard output; `-J' is what produces it.
+Symbol `url' stands for the video URL.  See
+`browser-gt-youtube--yt-dlp-args'."
+  :type '(repeat (choice string (const url)))
+  :group 'browser-gt-youtube)
+
+(defcustom browser-gt-youtube-transcript-vtt-args
+  '("--write-sub" "--write-auto-sub"
+    "--sub-lang"   lang
+    "--sub-format" "vtt"
+    "--skip-download"
+    "--no-playlist"
+    "-o" output
+    url)
+  "Command line passed to yt-dlp to download subtitles as a VTT file.
+Symbol `url' stands for the video URL, `lang' for the subtitle
+language code, and `output' for the yt-dlp output template (a path
+without extension).  See `browser-gt-youtube--yt-dlp-args'."
+  :type '(repeat (choice string (const url) (const lang) (const output)))
+  :group 'browser-gt-youtube)
 
 ;; ── URL helpers ───────────────────────────────────────────────────────────────
 
@@ -363,21 +403,72 @@ Schedules the transcript fetch and returns immediately
 
 ;; ── yt-dlp helpers ───────────────────────────────────────────────────────────
 
+(defun browser-gt-youtube--yt-dlp-args (template bindings)
+  "Return the yt-dlp argument list for TEMPLATE under BINDINGS.
+TEMPLATE is a list of strings and placeholder symbols, as held by
+`browser-gt-youtube-transcript-info-args' and
+`browser-gt-youtube-transcript-vtt-args'.  BINDINGS is an alist
+mapping each placeholder symbol to its string value for this call.
+Signals an error when TEMPLATE names a symbol BINDINGS does not
+supply, so a typo in a customized template is reported rather than
+passed to yt-dlp as nil."
+  (mapcar (lambda (item)
+            (cond
+             ((stringp item) item)
+             ((assq item bindings) (cdr (assq item bindings)))
+             (t (error "Unknown yt-dlp argument placeholder: %S" item))))
+          template))
+
 (defun browser-gt-youtube--transcript-get-info (url)
-  "Run yt-dlp -J URL and return parsed JSON hash-table."
+  "Run yt-dlp on URL for metadata and return the parsed JSON hash-table.
+The command line comes from `browser-gt-youtube-transcript-info-args'.
+Standard error goes to a file, not to the buffer being parsed: yt-dlp
+writes warnings there while the JSON goes to standard output, and
+`call-process' would otherwise merge the two.  See issue #5."
   (unless (executable-find browser-gt-youtube-transcript-yt-dlp-executable)
     (error "Yt-dlp not found (set browser-gt-youtube-transcript-yt-dlp-executable)"))
-  (let ((default-directory (expand-file-name "~/")))
+  (let ((default-directory (expand-file-name "~/"))
+        (stderr-file       (make-temp-file "browser-gt-yt-dlp-stderr-")))
+    (unwind-protect
+        (with-temp-buffer
+          (let ((exit-code (apply #'call-process
+                                  browser-gt-youtube-transcript-yt-dlp-executable
+                                  nil (list t stderr-file) nil
+                                  (browser-gt-youtube--yt-dlp-args
+                                   browser-gt-youtube-transcript-info-args
+                                   `((url . ,url))))))
+            (unless (zerop exit-code)
+              (error "Yt-dlp metadata call failed (exit %d): %s"
+                     exit-code
+                     (browser-gt-youtube--first-line
+                      (browser-gt-youtube--file-contents stderr-file))))
+            (goto-char (point-min))
+            (let ((json-object-type 'hash-table)
+                  (json-array-type  'list)
+                  (json-key-type    'string))
+              ;; yt-dlp can exit 0 having produced no JSON at all; report
+              ;; its own message rather than the parse failure.
+              (condition-case err
+                  (json-read)
+                (error
+                 (error "Yt-dlp produced no JSON (%s); stderr: %s"
+                        (error-message-string err)
+                        (browser-gt-youtube--first-line
+                         (browser-gt-youtube--file-contents stderr-file))))))))
+      (delete-file stderr-file))))
+
+(defun browser-gt-youtube--file-contents (path)
+  "Return the contents of PATH as a string, or nil when it cannot be read."
+  (ignore-errors
     (with-temp-buffer
-      (let ((exit-code (call-process browser-gt-youtube-transcript-yt-dlp-executable
-                                     nil t nil "-J" "--no-playlist" url)))
-        (unless (zerop exit-code)
-          (error "Yt-dlp -J failed (exit %d)" exit-code))
-        (goto-char (point-min))
-        (let ((json-object-type 'hash-table)
-              (json-array-type  'list)
-              (json-key-type    'string))
-          (json-read))))))
+      (insert-file-contents path)
+      (buffer-string))))
+
+(defun browser-gt-youtube--first-line (text)
+  "Return the first non-empty line of TEXT, or a placeholder when there is none."
+  (or (seq-find (lambda (line) (not (string-empty-p (string-trim line))))
+                (split-string (or text "") "\n"))
+      "(no output)"))
 
 (defun browser-gt-youtube--transcript-effective-lang (info lang)
   "Return the subtitle language code actually available in INFO for LANG.
@@ -395,19 +486,19 @@ Returns nil if nothing is found."
 
 (defun browser-gt-youtube--transcript-download-vtt (url lang conv-dir video-id)
   "Download VTT subtitles for URL in LANG into CONV-DIR.
-VIDEO-ID is used as the output filename stem.
+VIDEO-ID is used as the output filename stem.  The command line comes
+from `browser-gt-youtube-transcript-vtt-args'.
 Returns the path of the downloaded VTT file, or nil if not found."
   (let ((default-directory conv-dir))
     (with-temp-buffer
-      (call-process browser-gt-youtube-transcript-yt-dlp-executable
-                    nil t nil
-                    "--write-sub" "--write-auto-sub"
-                    "--sub-lang"    lang
-                    "--sub-format"  "vtt"
-                    "--skip-download"
-                    "--no-playlist"
-                    "-o" (expand-file-name video-id conv-dir)
-                    url)))
+      (apply #'call-process
+             browser-gt-youtube-transcript-yt-dlp-executable
+             nil t nil
+             (browser-gt-youtube--yt-dlp-args
+              browser-gt-youtube-transcript-vtt-args
+              `((url    . ,url)
+                (lang   . ,lang)
+                (output . ,(expand-file-name video-id conv-dir)))))))
   (car (file-expand-wildcards (format "%s/*.vtt" conv-dir))))
 
 ;; ── VTT → Org conversion ─────────────────────────────────────────────────────

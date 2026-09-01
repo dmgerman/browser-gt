@@ -988,6 +988,9 @@ Configuration variables for paths, output locations, and credentials
 | =browser-gt-youtube-videos-file=     | org file the YouTube capture appends to       |
 | =browser-gt-youtube-transcript-dir=  | where transcripts are written                 |
 | =browser-gt-youtube-api-key=         | YouTube Data API v3 key (for video metadata)  |
+| =browser-gt-youtube-transcript-yt-dlp-executable= | path to =yt-dlp=                 |
+| =browser-gt-youtube-transcript-info-args= | =yt-dlp= command line for the metadata call |
+| =browser-gt-youtube-transcript-vtt-args=  | =yt-dlp= command line for the subtitle download |
 | =browser-gt-org-capture-key=         | org-capture template key for browser captures |
 | =browser-gt-default-client=          | default browser client for every browser-gt command |
 | =browser-gt-url-routes=              | per-pattern URL routing for =browser-gt-browse-url= |
@@ -1005,6 +1008,42 @@ Configuration variables for paths, output locations, and credentials
 | =browser-gt-tab-manager-bookmark-function= | function used by the manager's =b= / =B= actions to save a bookmark; default calls =bookmark-store= with a browser-gt-owned handler that dispatches via =browse-url= |
 
 The full list is in =CONTRIBUTING.org=.
+
+*** yt-dlp command lines
+
+=YOUTUBE_TRANSCRIPT= runs =yt-dlp= twice: once for the video metadata,
+which says whether a transcript exists and in what language, and once
+to download the subtitles as VTT.  Both command lines are held whole in
+a variable, so an option =yt-dlp= gains or renames is a customisation
+rather than a patch:
+
+#+begin_src emacs-lisp
+browser-gt-youtube-transcript-info-args
+;; => ("-J" "--no-playlist" url)
+
+browser-gt-youtube-transcript-vtt-args
+;; => ("--write-sub" "--write-auto-sub" "--sub-lang" lang
+;;     "--sub-format" "vtt" "--skip-download" "--no-playlist"
+;;     "-o" output url)
+#+end_src
+
+Strings are passed to =yt-dlp= unchanged.  The symbols =url=, =lang=
+and =output= are replaced with the values for the call at hand: the
+video URL, the subtitle language code, and the output template.  Any
+other symbol raises an error rather than reaching =yt-dlp=.
+
+Add options by editing the list.  Cookies for age-restricted or
+members-only videos:
+
+#+begin_src emacs-lisp
+(setq browser-gt-youtube-transcript-info-args
+      '("-J" "--no-playlist" "--cookies-from-browser" "firefox" url))
+#+end_src
+
+=yt-dlp= needs a JavaScript runtime to descramble media stream URLs and
+looks for =deno= by default.  Transcripts do not go through that path
+and are fetched without one, but =yt-dlp= warns when no runtime is
+found; =--js-runtimes bun= (or =node=) in both lists silences it.
 
 ** Chrome extension
 

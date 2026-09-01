@@ -246,6 +246,8 @@ org-capture templates: =(browser-gt-get-url)=,
 | =browser-gt-youtube-videos-file=                  | org file the YouTube capture appends to (set this)                           |
 | =browser-gt-youtube-transcript-dir=               | directory where YouTube transcripts are written (set this)                   |
 | =browser-gt-youtube-transcript-yt-dlp-executable= | =yt-dlp= binary used to fetch subtitles                                        |
+| =browser-gt-youtube-transcript-info-args=         | =yt-dlp= command line for the metadata call (see README)                       |
+| =browser-gt-youtube-transcript-vtt-args=          | =yt-dlp= command line for the subtitle download (see README)                   |
 
 The bundled =defvar= defaults assume a particular directory layout;
 the path variables should be set explicitly per installation.

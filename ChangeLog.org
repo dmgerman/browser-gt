@@ -3,6 +3,26 @@
 
 * dmg-devel
 
+- Fix the JSON parse error when saving a YouTube transcript (issue
+  #5).  The metadata call let =call-process= merge yt-dlp's standard
+  error into the buffer being parsed, so any warning yt-dlp printed
+  --the one about a missing JavaScript runtime, among others--became
+  the first thing =json-read= saw.  Standard error now goes to its own
+  file, and yt-dlp's message is reported when a call does fail.
+- The yt-dlp command lines are configurable:
+  =browser-gt-youtube-transcript-info-args= and
+  =browser-gt-youtube-transcript-vtt-args= hold a complete argument
+  list each, with =url=, =lang= and =output= as placeholders.
+  =browser-gt-youtube-transcript-yt-dlp-executable= is now a
+  =defcustom=.
+- The pop-up in the extension now properly shows the name of the
+  client.
+- The popup shows the client name Emacs registered, and says
+  Disconnected when there is no registration, instead of guessing the
+  name locally.  The guess relied on =typeof browser= to tell Chrome
+  from Firefox, which stopped discriminating once Chrome added the
+  =browser= alias, so a Chrome popup read "firefox".
+
 * 0.95b
 
 - Make sure the extensions handler errors gracefully and do not
