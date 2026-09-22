@@ -1563,7 +1563,8 @@ the marks say which of the two cost the time."
 ;; therefore moves time between S2 and S6 but never into or out of S1.
 
 (defun browser-gt--format-receive-deltas (t4 marks dt-end-ms)
-  "Return \" S6=..ms S7a=..ms S7b=..ms S7c=..ms\" from MARKS, or nil.
+  "Return a receive-delta summary string, or nil.
+The result has the form \" S6=..ms S7a=..ms S7b=..ms S7c=..ms\".
 T4 is the extension's post-`chrome.*' stamp in `Date.now'
 milliseconds; MARKS is `browser-gt--last-receive-marks'; DT-END-MS is
 the instant the request returned, in the same epoch milliseconds.

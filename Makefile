@@ -12,7 +12,11 @@
 #   make extension      — rebuild Chrome + Firefox extension targets
 #                         (delegates to extension/Makefile's default target)
 #   make clean          — remove every *.elc file
-#   make check          — compile + lint + checkdoc + check-declare + info
+#   make check-worktree — abort unless $(CURDIR) is the worktree git
+#                         itself resolves to (catches a stale second
+#                         checkout that lints green but is not pushed)
+#   make check          — check-worktree + compile + lint + checkdoc
+#                         + check-declare + info
 #   make check-ci       — same as `make check' but under $(CI_EMACS)
 #                         (defaults to emacs-plus@30, matching the
 #                         GitHub Actions matrix; run before pushing)
@@ -59,7 +63,7 @@ EMACS_BATCH = $(EMACS) -Q --batch \
   --eval "(add-to-list 'package-archives '(\"melpa\" . \"https://melpa.org/packages/\"))" \
   --eval "(package-initialize)"
 
-.PHONY: default lint checkdoc check-declare compile clean check check-ci extension info all
+.PHONY: default lint checkdoc check-declare compile clean check check-ci check-worktree extension info all
 
 # Default target: byte-compile the elisp, rebuild the WebExtension
 # bundles, and regenerate the Info manual if README.org changed.
@@ -171,7 +175,29 @@ $(INFO_DIR): $(INFO_FILE)
 extension:
 	$(MAKE) -C extension
 
-check: compile lint checkdoc check-declare info
+# Guard against linting a checkout that is not the one git (and hence
+# CI) sees.  A second, stale checkout whose `.git' file points at a
+# gitdir whose `core.worktree' names a *different* directory reads as
+# "clean" to git while `make' happily compiles and lints the stale
+# files sitting next to it -- a green `check-ci' on code that is not
+# what gets pushed.  That is exactly how the 2026-09-22 checkdoc
+# failure reached CI.  Comparing the physical path of `git
+# rev-parse --show-toplevel' against $(CURDIR) catches it outright.
+check-worktree:
+	@top=`git rev-parse --show-toplevel 2>/dev/null`; \
+	if [ -z "$$top" ]; then \
+	  echo "not inside a git worktree: $(CURDIR)"; \
+	  exit 1; \
+	fi; \
+	if [ "`cd \"$$top\" && pwd -P`" != "`cd \"$(CURDIR)\" && pwd -P`" ]; then \
+	  echo "WRONG WORKTREE -- refusing to run."; \
+	  echo "  make is running in: $(CURDIR)"; \
+	  echo "  git resolves to   : $$top"; \
+	  echo "Sources here are NOT what git or CI sees; cd to the path above."; \
+	  exit 1; \
+	fi
+
+check: check-worktree compile lint checkdoc check-declare info
 
 # CI-mirror check: force the same Emacs version the GitHub Actions
 # matrix pins.  The default `make check' runs under whatever `emacs'

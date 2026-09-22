@@ -103,6 +103,32 @@ default cleanly from the fresh load.
 Always do this in the live-session reload incantation when changing
 a defvar default — don't trust the documentation default.
 
+### checkdoc's imperative check scans the whole first docstring line
+
+`checkdoc` does not merely check that a docstring *starts* with an
+imperative verb.  With `checkdoc-verb-check-experimental-flag` on (the
+default), it searches the **entire first line** — case-insensitively —
+for any word in `checkdoc-common-verbs-wrong-voice`
+(`checkdoc.el`, `checkdoc-this-string-valid-engine`).
+
+So an UPPERCASE argument name that happens to be a plural verb trips
+it even when the docstring begins correctly:
+
+```elisp
+(defun browser-gt--format-receive-deltas (t4 marks dt-end-ms)
+  "Return a receive-delta summary string from MARKS, or nil.   ; ✗
+   → browser-gt.el:1566: Probably "MARKS" should be imperative "Mark"
+```
+
+The alist includes `marks`, `checks`, `sets`, `calls`, `finds`,
+`contains`, `returns`, `adds`, `allows`, and ~70 more.  Fix by moving
+the argument reference off line 1:
+
+```elisp
+  "Return a receive-delta summary string, or nil.               ; ✓
+The result has the form \" S6=..ms ...\"; MARKS is ..."
+```
+
 ### `lexical-binding: t` breaks dynamic `let` on `org-capture-initial`
 
 Symbols like `org-capture-initial`, `org-capture-templates`, and
