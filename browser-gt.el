@@ -238,6 +238,26 @@ encoded and written.  Splits the interval the extension reports as
 part; without it a stall before the socket write is indistinguishable
 from one in the browser.  Not part of the public API.")
 
+(defvar browser-gt--last-send-resources nil
+  "Resource sample taken at the same instant as `browser-gt--last-send-time'.
+A plist in the shape `browser-gt--resource-sample' returns, or nil.
+Differenced against the sample the advice takes on entry to report
+what the Emacs process was doing during the pre-send stage.  Not part
+of the public API.")
+
+(defvar browser-gt--last-receive-marks nil
+  "Float-time stamps recorded while a response frame was being received.
+A plist with `:arrival' (first frame of the message), `:parsed'
+\(`json-parse-string' returned) and `:dispatched' (the pending
+callback is about to run).  Set by `browser-gt--on-message' and
+`browser-gt--handle-response'; read by `browser-gt--timing-advice'.
+
+The stamps are process-wide rather than per-request: a frame for some
+other message arriving between a request's send and its response
+overwrites them.  That mis-attributes the receive breakdown of a
+request that overlapped other traffic, but cannot affect any earlier
+stage.  Not part of the public API.")
+
 (defvar browser-gt-pandoc-executable "pandoc"
   "Path to the pandoc executable used for HTML → org conversion.
 Shared by browser-gt-www and browser-gt-chatgpt backends.")
@@ -360,6 +380,126 @@ its lines from the same clock in the same two forms."
                       (format-time-string "%FT%T.%3N"))
               (apply #'format fmt args)
               "\n"))))
+
+;; ── Resource sampling ────────────────────────────────────────────────────────
+;;
+;; The pre-send stage does roughly 25us of work, yet has been observed
+;; taking 750ms.  Nothing in it can be slow, so the cause is something
+;; that halts the process irrespective of what it is executing.  The
+;; candidates divide on a single question: was Emacs running during the
+;; stall, or not?
+;;
+;;   cpu ~= wall   Emacs was executing.  With a `gcs' delta, that is a
+;;                 garbage collection; without one, a busy loop
+;;                 somewhere in the call path.
+;;   cpu ~= 0      Emacs was not scheduled.  `majflt' separates paging
+;;                 from plain CPU contention (another process, async
+;;                 native compilation, an indexer); if neither moved,
+;;                 the wall clock itself may have stepped, since
+;;                 `float-time' is not monotonic.
+;;
+;; `process-attributes' costs about 20us per call and is only sampled
+;; when `browser-gt-debug-timing' is on, so it adds nothing to a normal
+;; session.  Fields vary by platform: `rss' and `majflt' are absent on
+;; some systems, so every reader must tolerate nil.
+
+(defun browser-gt--cpu-seconds ()
+  "Return this process's user+system CPU seconds, or nil if unavailable.
+The figure is whatever `process-attributes' reports, which is not
+always in real seconds — see `browser-gt--cpu-scale'."
+  (let* ((attrs (ignore-errors (process-attributes (emacs-pid))))
+         (utime (alist-get 'utime attrs))
+         (stime (alist-get 'stime attrs)))
+    (when (and utime stime)
+      (+ (float-time utime) (float-time stime)))))
+
+;; `process-attributes' does not report real CPU seconds everywhere.  On
+;; Apple Silicon it returns mach ticks without applying the timebase, so
+;; the figure is low by 125/3 ~= 41.7: this machine's cumulative CPU
+;; reads 137s where `ps' says 5740s.  The error is a constant factor,
+;; not noise, so one calibration recovers the true value.
+;;
+;; A busy loop of known wall duration is pure CPU by construction, so
+;; wall/cpu over it is the factor.  Being descheduled mid-loop inflates
+;; wall and therefore the ratio, so the smallest ratio across several
+;; trials is the least-contended and the best estimate.
+
+(defvar browser-gt--cpu-scale 'uncalibrated
+  "Factor converting `browser-gt--cpu-seconds' output to real seconds.
+`uncalibrated' until `browser-gt--cpu-scale-value' runs; nil when the
+platform reports no usable CPU time at all, in which case the CPU
+column is omitted rather than guessed at.")
+
+(defconst browser-gt--cpu-calibration-ms 10
+  "Wall milliseconds each CPU calibration trial spins for.")
+
+(defun browser-gt--cpu-scale-trial ()
+  "Spin for `browser-gt--cpu-calibration-ms' and return wall/cpu, or nil."
+  (let ((before (browser-gt--cpu-seconds))
+        (t0     (float-time)))
+    (when before
+      (let ((deadline (+ t0 (/ browser-gt--cpu-calibration-ms 1000.0))))
+        (while (< (float-time) deadline) (ignore))
+        (let ((wall (- (float-time) t0))
+              (cpu  (- (or (browser-gt--cpu-seconds) 0) before)))
+          (when (and (> cpu 0) (> wall 0))
+            (/ wall cpu)))))))
+
+(defun browser-gt--cpu-scale-value ()
+  "Return the CPU correction factor, calibrating on first use.
+Costs three short busy loops once per session.  A factor far above
+what any real timebase would explain is treated as an unusable
+counter and reported as nil."
+  (if (not (eq browser-gt--cpu-scale 'uncalibrated))
+      browser-gt--cpu-scale
+    (setq browser-gt--cpu-scale
+          (let ((ratios (delq nil (mapcar (lambda (_) (browser-gt--cpu-scale-trial))
+                                          (number-sequence 1 3)))))
+            (when ratios
+              (let ((best (seq-min ratios)))
+                (and (< best 1000.0) best)))))))
+
+(defun browser-gt--resource-sample ()
+  "Return a plist of process-wide resource counters, or nil when disabled.
+The plist has `:time' (`float-time'), `:gcs' (`gcs-done'), `:gc'
+\(`gc-elapsed'), and — when `process-attributes' supplies them —
+`:cpu' (user plus system seconds, uncorrected), `:majflt' and `:rss'.
+Differences between two samples are formatted by
+`browser-gt--format-resource-delta', which applies the correction."
+  (when browser-gt-debug-timing
+    (let ((attrs (ignore-errors (process-attributes (emacs-pid)))))
+      (list :time   (float-time)
+            :gcs    gcs-done
+            :gc     gc-elapsed
+            :cpu    (browser-gt--cpu-seconds)
+            :majflt (alist-get 'majflt attrs)
+            :rss    (alist-get 'rss attrs)))))
+
+(defun browser-gt--format-resource-delta (before after wall-ms)
+  "Return what the Emacs process did between samples BEFORE and AFTER, or \"\".
+WALL-MS is the wall-clock span in milliseconds, included so the CPU
+figure can be read against it without arithmetic.  Missing fields are
+omitted rather than reported as zero, since absent and zero mean very
+different things here."
+  (if (not (and before after))
+      ""
+    (let* ((gcs  (- (plist-get after :gcs) (plist-get before :gcs)))
+           (gc   (- (plist-get after :gc)  (plist-get before :gc)))
+           (cpu0 (plist-get before :cpu))
+           (cpu1 (plist-get after  :cpu))
+           (flt0 (plist-get before :majflt))
+           (flt1 (plist-get after  :majflt))
+           (rss0 (plist-get before :rss))
+           (rss1 (plist-get after  :rss))
+           (scale (browser-gt--cpu-scale-value)))
+      (concat
+       (format " [gc=%.0fms*%d" (* 1000.0 gc) gcs)
+       (if (and cpu0 cpu1 scale)
+           (format " cpu=%.0f/%.0fms" (* 1000.0 scale (- cpu1 cpu0)) wall-ms)
+         " cpu=n/a")
+       (if (and flt0 flt1) (format " majflt=%d" (- flt1 flt0)) "")
+       (if (and rss0 rss1) (format " rss=%+dk" (- rss1 rss0)) "")
+       "]"))))
 
 (defun browser-gt--warn (fmt &rest args)
   "Surface a browser-gt warning to the user and the debug log.
@@ -497,6 +637,9 @@ fix the underlying condition and re-invoke."
                :on-message #'browser-gt--on-message
                :on-error   #'browser-gt--on-error))
         (browser-gt--log "[SERVER] started on port %d" browser-gt-port)
+        ;; Record what the later S1..S7 lines will need to be read
+        ;; against, so a pasted *browser-gt* buffer is self-contained.
+        (browser-gt--log-environment)
         (message "Browser-gt WebSocket server started on port %d" browser-gt-port))
     (error
      (setq browser-gt--server-process nil)
@@ -582,6 +725,12 @@ disconnects the client instead of growing the accumulator further."
          (complete-p (websocket-frame-completep frame))
          (prior-cell (assq ws browser-gt--rx-buffers))
          (combined   (concat (cdr prior-cell) text)))
+    ;; S6 ends at the first frame of a message; everything after it is
+    ;; S7.  Stamped before the accumulator is touched so S7a covers the
+    ;; remaining frames and the parse rather than starting after them.
+    (unless prior-cell
+      (setq browser-gt--last-receive-marks
+            (list :arrival (float-time))))
     (cond
      ;; Over the size cap — disconnect and stop accumulating.
      ((and browser-gt-max-message-bytes
@@ -612,6 +761,10 @@ disconnects the client instead of growing the accumulator further."
                     (browser-gt--warn "could not parse frame as JSON: %s"
                                          (error-message-string err))
                     nil))))
+        ;; S7a ends here: frame accumulation plus the JSON parse.
+        (setq browser-gt--last-receive-marks
+              (plist-put browser-gt--last-receive-marks
+                         :parsed (float-time)))
         (cond
          ((null msg) nil)
          ((plist-get msg :name)
@@ -672,6 +825,11 @@ If no pending callback matches (likely already timed out), surfaces a warning."
         ;; `browser-gt--timing-advice' after the callback returns.
         ;; See doc/latency-instrumentation.org.
         (setq browser-gt--last-response-timing (plist-get msg :__timing))
+        ;; S7b ends here: the pending callback has been matched and its
+        ;; timeout cancelled.  What follows is S7c, the callback itself.
+        (setq browser-gt--last-receive-marks
+              (plist-put browser-gt--last-receive-marks
+                         :dispatched (float-time)))
         (browser-gt--timing-log "RECV id=%s" id)
         (condition-case err
             (funcall callback (plist-get msg :payload))
@@ -1185,9 +1343,14 @@ invoked with a status:error payload and nil is returned."
        (setq browser-gt--pending-callbacks
              (cons (cons id (cons wrapped timer))
                    browser-gt--pending-callbacks))
-       ;; Stamp immediately before the write so the advice can report
-       ;; how much of the pre-arrival interval was spent here rather
-       ;; than in transport or in the browser's event loop.
+       ;; Close S1 immediately before the write, so the advice can tell
+       ;; an Emacs-side stall from transport or browser event-loop cost.
+       ;; Counters first, clock second, matching the order the advice
+       ;; uses on entry: both intervals are then offset by the same one
+       ;; `process-attributes' call and their durations agree.  That
+       ;; call (~20us) does land inside S1, which is immaterial against
+       ;; the 750ms stalls this exists to explain.
+       (setq browser-gt--last-send-resources (browser-gt--resource-sample))
        (setq browser-gt--last-send-time (float-time))
        (browser-gt--timing-log "SEND %s id=%s" name id)
        (browser-gt--send-to ws
@@ -1264,14 +1427,87 @@ roster."
 ;; observed wall-clock time exceeds `browser-gt-slow-request-threshold'.
 ;; When `browser-gt-debug-timing' is non-nil AND the extension attached a
 ;; `:__timing' plist to the response frame, a per-stage breakdown is
-;; appended so latency can be attributed to WS transport, offscreen
-;; -> SW hop, in-SW dispatch, chrome.* API, or return trip.
+;; appended so latency can be attributed to a numbered stage: S1 Emacs
+;; setup, S2 transport out, S3 offscreen -> SW hop, S4 in-SW dispatch,
+;; S5 chrome.* API, S6 transport back, S7a..S7c Emacs receive path.
 ;;
 ;; Revert plan (see slow-random-response-time.md): delete
 ;; `browser-gt-debug-timing', `browser-gt-slow-request-threshold',
-;; `browser-gt--last-response-timing', `browser-gt--format-timing-deltas',
+;; `browser-gt--last-response-timing', `browser-gt--last-send-time',
+;; `browser-gt--last-send-resources', `browser-gt--last-receive-marks',
+;; `browser-gt--resource-sample', `browser-gt--format-resource-delta',
+;; `browser-gt-environment-report', `browser-gt--log-environment',
+;; `browser-gt--format-receive-deltas', `browser-gt--format-timing-deltas',
 ;; `browser-gt--timing-advice', and the `advice-add' call below; drop the
-;; matching setq in `browser-gt--handle-response'.
+;; matching setqs in `browser-gt--handle-response' and
+;; `browser-gt--on-message', and the `browser-gt--log-environment' call
+;; in `browser-gt-start'.
+
+;; ── Environment report ───────────────────────────────────────────────────────
+;;
+;; Every stage number below is measured on someone else's machine, and
+;; the same figure means different things depending on the machine it
+;; came from: a 750ms S1 is an unremarkable garbage collection on a
+;; config with a 1GB threshold and a serious anomaly on a stock one.
+;; None of that is recoverable from the timing lines, so a report is
+;; only interpretable alongside the settings that shaped it.  This is
+;; written once when the server starts and is available on demand, so
+;; a user pasting their *browser-gt* buffer includes it without being
+;; asked for a second round of questions.
+
+(defun browser-gt-environment-report ()
+  "Return a multi-line description of the Emacs this bridge is running in.
+Covers what the S1..S7 numbers cannot say for themselves: the garbage
+collector's configuration and history, whether native compilation is
+active, how loaded the timer lists are, and how long the session has
+been up.  Interactively, also append it to the *browser-gt* buffer."
+  (interactive)
+  (let* ((attrs (ignore-errors (process-attributes (emacs-pid))))
+         (report
+          (string-join
+           (list
+            (format "emacs      %s  (%s)" emacs-version system-configuration)
+            (format "system     %s  window-system=%s"
+                    system-type (or window-system "none"))
+            (format "uptime     %s" (emacs-uptime))
+            (format "gc         threshold=%s percentage=%s done=%d elapsed=%.1fs mean=%.0fms"
+                    gc-cons-threshold gc-cons-percentage gcs-done gc-elapsed
+                    (if (> gcs-done 0) (* 1000.0 (/ gc-elapsed gcs-done)) 0.0))
+            (format "gcmh       %s"
+                    (if (bound-and-true-p gcmh-mode) "on" "off/absent"))
+            (format "native     available=%s async-jobs=%s deferred=%s"
+                    (and (fboundp 'native-comp-available-p)
+                         (native-comp-available-p))
+                    (bound-and-true-p native-comp-async-jobs-number)
+                    (bound-and-true-p native-comp-jit-compilation))
+            (format "timers     timer-list=%d idle=%d"
+                    (length timer-list) (length timer-idle-list))
+            (let ((raw   (browser-gt--cpu-seconds))
+                  (scale (browser-gt--cpu-scale-value)))
+              ;; cpu-scale is 1.0 where `process-attributes' is honest
+              ;; and ~41.7 on Apple Silicon, where Emacs omits the mach
+              ;; timebase conversion.  Printed so a surprising cpu= in
+              ;; the stage lines can be traced to the correction rather
+              ;; than mistaken for the measurement.
+              (format "process    rss=%sk majflt=%s cpu=%s (raw=%s scale=%s)"
+                      (or (alist-get 'rss attrs) "n/a")
+                      (or (alist-get 'majflt attrs) "n/a")
+                      (if (and raw scale) (format "%.1fs" (* scale raw)) "n/a")
+                      (if raw (format "%.1fs" raw) "n/a")
+                      (if scale (format "%.2f" scale) "unusable")))
+            (format "browser-gt debug=%s timing=%s threshold=%ss clients=%s"
+                    browser-gt-debug browser-gt-debug-timing
+                    browser-gt-slow-request-threshold
+                    (or (browser-gt-connected-clients) "none")))
+           "\n")))
+    (when (called-interactively-p 'any)
+      (browser-gt--timing-log "environment\n%s" report)
+      (message "%s" report))
+    report))
+
+(defun browser-gt--log-environment ()
+  "Write `browser-gt-environment-report' to the *browser-gt* buffer."
+  (browser-gt--timing-log "environment\n%s" (browser-gt-environment-report)))
 
 (defun browser-gt--format-timing-marks (timing t3)
   "Return the sub-stage deltas of TIMING as \" label=Nms\" pairs, or \"\".
@@ -1279,10 +1515,10 @@ T3 is the dispatch stamp the first mark is measured from; each later
 mark is measured from the one before it.
 
 Marks are recorded inside a shape adapter in the extension (see
-`extension/src/handlers.js').  They subdivide the `api' segment, which
-is otherwise a single number covering an adapter that may make several
-`chrome.*' calls: `OPEN_TAB' creates a tab and then raises its window,
-and only the marks say which of the two cost the time."
+`extension/src/handlers.js').  They subdivide S5, which is otherwise a
+single number covering an adapter that may make several `chrome.*'
+calls: `OPEN_TAB' creates a tab and then raises its window, and only
+the marks say which of the two cost the time."
   (let ((marks (plist-get timing :marks)))
     (if (not (consp marks))
         ""
@@ -1298,50 +1534,114 @@ and only the marks say which of the two cost the time."
                   (cons t3 nil))))
         (apply #'concat (reverse (cdr acc)))))))
 
-(defun browser-gt--format-timing-deltas (t0-float timing dt-total &optional send-float)
-  "Return a one-line per-stage breakdown for TIMING or nil.
-T0-FLOAT is the pre-send `float-time' (seconds).  TIMING is the plist
-extracted from the response's `:__timing' field (`:t1' .. `:t4'
-in `Date.now' milliseconds; a Chrome-only field, may be nil).
-DT-TOTAL is the total wall-clock seconds already measured by the
-caller; the return-trip delta is derived as dt-total minus the
-sum of the other deltas so all six sum to the observed total.
+;; ── Stage numbering ──────────────────────────────────────────────────────────
+;;
+;; A request is one sequence of operations, and every stamp below marks
+;; a boundary between two of them.  The labels are fixed so a report
+;; from a user can be read without re-deriving what each number covers:
+;;
+;;   S1   Emacs    resolve target, make request id, arm timeout, register
+;;                 callback.  Ends at the `float-time' taken immediately
+;;                 before the write.
+;;   S2   -> wire  JSON encode, socket write, browser delivers the event.
+;;   S3   browser  socket-owning context -> service worker, including a
+;;                 cold start of the worker.
+;;   S4   browser  select the handler for the request name.
+;;   S5   browser  the chrome.* call.  Subdivided by handler marks.
+;;   S6   wire ->  response encode and return transport, up to the first
+;;                 response frame reaching Emacs.
+;;   S7a  Emacs    accumulate remaining frames, then `json-parse-string'.
+;;   S7b  Emacs    match the pending callback and cancel its timeout.
+;;   S7c  Emacs    run the callback and return to the caller.
+;;
+;; S1 through S6 each come from two stamps.  S7c is the remainder, so it
+;; absorbs rounding and anything unstamped.  When the receive marks are
+;; missing the last four collapse to a single derived `S6-7'.
+;;
+;; S1, S2 and S6 are the only spans that mix clocks: S1 is Emacs-only,
+;; S3 through S5 are browser-only, and S2/S6 straddle the two.  Skew
+;; therefore moves time between S2 and S6 but never into or out of S1.
 
-SEND-FLOAT, when non-nil, is the `float-time' captured immediately
-before the frame was written (`browser-gt--last-send-time').  It
-splits what would otherwise be reported as one `ws' interval into
-`pre' (Emacs-side setup: id generation, timer arming) and `ws'
-\(JSON encoding, the socket write, and the browser delivering the
-message event).  Without it a stall in Emacs before the write is
-reported as transport cost."
+(defun browser-gt--format-receive-deltas (t4 marks dt-end-ms)
+  "Return \" S6=..ms S7a=..ms S7b=..ms S7c=..ms\" from MARKS, or nil.
+T4 is the extension's post-`chrome.*' stamp in `Date.now'
+milliseconds; MARKS is `browser-gt--last-receive-marks'; DT-END-MS is
+the instant the request returned, in the same epoch milliseconds.
+Returns nil when the marks are absent, letting the caller fall back to
+one derived figure for the whole return path."
+  (let ((arrival    (plist-get marks :arrival))
+        (parsed     (plist-get marks :parsed))
+        (dispatched (plist-get marks :dispatched)))
+    (when (and (numberp arrival) (numberp parsed) (numberp dispatched))
+      (let ((a-ms (* 1000.0 arrival))
+            (p-ms (* 1000.0 parsed))
+            (d-ms (* 1000.0 dispatched)))
+        (format " S6=%.0fms S7a=%.0fms S7b=%.0fms S7c=%.0fms"
+                (max 0 (- a-ms t4))
+                (max 0 (- p-ms a-ms))
+                (max 0 (- d-ms p-ms))
+                (max 0 (- dt-end-ms d-ms)))))))
+
+(defun browser-gt--format-timing-deltas (t0-float timing dt-total
+                                                  &optional send-float
+                                                  res-before res-after
+                                                  marks)
+  "Return a one-line S1..S7 breakdown for TIMING, or nil.
+T0-FLOAT is the `float-time' on entry to the request.  TIMING is the
+plist from the response's `:__timing' field (`:t1' .. `:t4' in
+`Date.now' milliseconds; Chrome-only, may be nil).  DT-TOTAL is the
+total wall-clock seconds measured by the caller.
+
+SEND-FLOAT is the `float-time' captured immediately before the frame
+was written.  It is what separates S1 from S2; without it a stall in
+Emacs before the write would be reported as transport cost.
+
+RES-BEFORE and RES-AFTER are `browser-gt--resource-sample' plists
+bracketing S1.  Their difference says whether the process was running
+during that stage, which is the question S1 timings alone cannot
+answer.  MARKS is `browser-gt--last-receive-marks', which splits the
+return path into S6 and S7a..S7c.
+
+See the stage numbering commentary above for what each label covers."
   (when timing
-    (let* ((t0-ms (* 1000.0 t0-float))
+    (let* ((t0-ms   (* 1000.0 t0-float))
            (send-ms (and (numberp send-float) (* 1000.0 send-float)))
-           (t1    (plist-get timing :t1))
-           (t2    (plist-get timing :t2))
-           (t3    (plist-get timing :t3))
-           (t4    (plist-get timing :t4)))
+           (end-ms  (+ t0-ms (* 1000.0 dt-total)))
+           (t1      (plist-get timing :t1))
+           (t2      (plist-get timing :t2))
+           (t3      (plist-get timing :t3))
+           (t4      (plist-get timing :t4)))
       (when (and (numberp t1) (numberp t2) (numberp t3) (numberp t4))
-        (let* ((d-pre      (if send-ms (max 0 (- send-ms t0-ms)) 0))
-               (d-ws       (max 0 (- t1 (or send-ms t0-ms))))
-               (d-hop      (max 0 (- t2 t1)))          ; t2 - t1
-               (d-dispatch (max 0 (- t3 t2)))          ; t3 - t2
-               (d-api      (max 0 (- t4 t3)))          ; t4 - t3
-               (d-return   (max 0 (- (* 1000.0 dt-total)
-                                     (+ d-pre d-ws d-hop d-dispatch d-api)))))
-          (format "[pre=%.0fms ws=%.0fms hop=%.0fms disp=%.0fms api=%.0fms ret=%.0fms%s]"
-                  d-pre d-ws d-hop d-dispatch d-api d-return
+        (let* ((s1      (if send-ms (max 0 (- send-ms t0-ms)) 0))
+               (s2      (max 0 (- t1 (or send-ms t0-ms))))
+               (s3      (max 0 (- t2 t1)))
+               (s4      (max 0 (- t3 t2)))
+               (s5      (max 0 (- t4 t3)))
+               (receive (browser-gt--format-receive-deltas t4 marks end-ms)))
+          (format "[S1=%.0fms%s S2=%.0fms S3=%.0fms S4=%.0fms S5=%.0fms%s%s]"
+                  s1
+                  (browser-gt--format-resource-delta res-before res-after s1)
+                  s2 s3 s4 s5
+                  (or receive
+                      (format " S6-7=%.0fms"
+                              (max 0 (- (* 1000.0 dt-total)
+                                        (+ s1 s2 s3 s4 s5)))))
                   (browser-gt--format-timing-marks timing t3)))))))
 
 (defun browser-gt--timing-advice (orig name &rest args)
   "Around advice on `browser-gt-request' that logs slow requests.
 ORIG is the original function, NAME the request name, ARGS the
 remaining args.  See doc/latency-instrumentation.org."
-  (let ((t0 (float-time))
-        ;; Clear before the call so a stale value from a prior request
-        ;; cannot leak into this one's breakdown.
-        (browser-gt--last-response-timing nil)
-        (browser-gt--last-send-time nil))
+  (let* ((res0 (browser-gt--resource-sample))
+         ;; Sampled after res0 so the counters cannot be credited with
+         ;; the cost of reading them; t0 is the S1 start either way.
+         (t0 (float-time))
+         ;; Clear before the call so a stale value from a prior request
+         ;; cannot leak into this one's breakdown.
+         (browser-gt--last-response-timing nil)
+         (browser-gt--last-send-time nil)
+         (browser-gt--last-send-resources nil)
+         (browser-gt--last-receive-marks nil))
     (unwind-protect
         (let ((result (apply orig name args)))
           (let* ((dt        (- (float-time) t0))
@@ -1350,7 +1650,9 @@ remaining args.  See doc/latency-instrumentation.org."
                  (breakdown (and browser-gt-debug-timing
                                  (browser-gt--format-timing-deltas
                                   t0 browser-gt--last-response-timing dt
-                                  browser-gt--last-send-time))))
+                                  browser-gt--last-send-time
+                                  res0 browser-gt--last-send-resources
+                                  browser-gt--last-receive-marks))))
             ;; Every request, not only the slow ones: an intermittent
             ;; stall is only interpretable against what the same request
             ;; costs the rest of the time, and the fast lines are what
@@ -1399,12 +1701,14 @@ the other timings mean.")
 
 (defun browser-gt--timing-ping-send (client)
   "Send one diagnostic PING to CLIENT and log its round trip.
-The per-stage breakdown is read from the dynamic stash the response
-handler fills in, so a request from elsewhere that lands between this
-probe's send and its response can be credited to the probe's `pre'.
-The stage the probe exists to measure — everything from the write to
-the extension's reply — is unaffected by that."
-  (let ((t0 (float-time)))
+The per-stage breakdown is read from the global stashes the send path
+and response handler fill in, so a request from elsewhere landing
+between this probe's send and its response can be credited to the
+probe's S1 and S6..S7.  S2 through S5 — everything from the write to
+the extension's reply, which is what the probe exists to measure —
+are unaffected by that."
+  (let ((res0 (browser-gt--resource-sample))
+        (t0   (float-time)))
     (browser-gt-request-async
      "PING" '(:probe t)
      (lambda (response)
@@ -1413,7 +1717,9 @@ the extension's reply — is unaffected by that."
                             (plist-get response :message)))
               (deltas  (browser-gt--format-timing-deltas
                         t0 browser-gt--last-response-timing dt
-                        browser-gt--last-send-time)))
+                        browser-gt--last-send-time
+                        res0 browser-gt--last-send-resources
+                        browser-gt--last-receive-marks)))
          (browser-gt--timing-log "PING %s %.3fs%s%s"
                                  client dt
                                  (if deltas (concat " " deltas) "")
