@@ -3,3 +3,4 @@ spookfox
 *.elc
 .elpa/
 .claude
+.DS_Store

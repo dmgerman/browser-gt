@@ -69,7 +69,12 @@
 //                             "localhost" — avoids IPv6 resolution
 //                             failure on macOS.
 //   options.reconnectMs       Reconnect delay in ms.  Default 5000.
-//   options.requestTimeoutMs  Per-request timeout in ms.  Default 5000.
+//   options.requestTimeoutMs  Per-request timeout in ms.  Default 10000,
+//                             matching `browser-gt-request-timeout' on the
+//                             Emacs side.  A large capture (a long ChatGPT
+//                             conversation runs to hundreds of KB) takes a
+//                             couple of seconds to reassemble, parse, and
+//                             write before Emacs answers.
 //
 // Returns { sendRequest, reconnect, getStatus, getClientName }.
 
@@ -77,7 +82,7 @@ import { stamp } from "./log-stamp.js";
 
 const DEFAULT_URL              = "ws://127.0.0.1:9130";
 const DEFAULT_RECONNECT_MS     = 5000;
-const DEFAULT_REQUEST_TIMEOUT  = 5000;
+const DEFAULT_REQUEST_TIMEOUT  = 10000;
 
 // ── Diagnostic timing ────────────────────────────────────────────────────
 //

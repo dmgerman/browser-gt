@@ -87,6 +87,34 @@ returns t.  Pattern is in `browsel.el` →
 Clean up the buffer on `:on-close` too — stale connections leak
 their accumulator otherwise.
 
+### Accumulate frame *bytes*, not frame text
+
+The obvious way to write that accumulator — `websocket-frame-text` per
+frame, concatenated — is wrong, and stays hidden until a payload is
+both large enough to fragment and not pure ASCII.
+
+`websocket-frame-text` is `(decode-coding-string
+(websocket-frame-payload frame) 'utf-8)`: it decodes **each frame on
+its own**.  A multibyte character split across the boundary decodes as
+two invalid halves, and the reassembled message fails to parse at
+exactly that offset:
+
+    [RECV-CONT] +130500 byte(s); total=130500
+    [RECV-CONT] +130390 byte(s); total=261072
+    [RECV] 302259 byte(s)
+    [WARN] could not parse frame as JSON: invalid utf-8 encoding: 1, nil, 130499
+
+Emacs then never answers, and the browser reports `request CHATGPT
+timed out` — which points at the wrong side of the bridge entirely.
+
+Fix: accumulate `websocket-frame-payload` (raw unibyte bytes) and
+`decode-coding-string` once, when the FIN bit arrives.  This also makes
+`browser-gt-max-message-bytes` count bytes rather than characters,
+which is what the name says.
+
+Regression test: send a >128 KB frame with a multibyte character placed
+near offset 131072 and check that a reply comes back.
+
 ## Emacs Lisp
 
 ### `defvar` doesn't override an already-bound variable
@@ -143,6 +171,132 @@ to treat the symbol as special.
 
 Same trick for `org-capture-templates`.  Both are in
 `browsel.el` and `browsel-youtube.el`.
+
+## ChatGPT specifically
+
+The full selector survey, with the probes that produced it, is in
+`ai/2026-09-25-chatgpt-changes.md`.  The three items below are the ones
+that do not announce themselves as breakage.
+
+### The conversation is virtualized: a single querySelectorAll lies
+
+Only about 4-5 turns are in the DOM at once; the rest are removed, not
+hidden.  `document.querySelectorAll('[data-chatgpt-search-unit-key]')`
+therefore returns whatever is near the current scroll position and
+*succeeds*, so a capture of a 23-turn conversation silently yields 6
+turns and looks fine.
+
+`extension/src/content-chatgpt.js` climbs from the newest turn to the
+oldest and accumulates units keyed by `data-chatgpt-search-unit-key`.
+It reports whether it reached the oldest turn;
+`browser-gt-chatgpt.el` writes `#+chatgpt_incomplete:` into the file
+and warns when it did not.  Any new feature that reads a whole
+conversation needs the same treatment, or a name that says it returns
+only what is rendered.
+
+### Older turns load lazily, and the pause looks exactly like the top
+
+This one already shipped a wrong fix once, so it is worth stating
+plainly: **"the container stopped scrolling" does not mean "this is
+the oldest turn."**
+
+A freshly loaded tab holds only the last few turns.  Scrolling up
+fetches the next chunk over the network, and until it arrives,
+`scrollTop` is clamped, `scrollHeight` is unchanged, and no new units
+appear.  That is indistinguishable from having reached the top.  A
+first version broke out of the climb after one such round, declared
+the oldest turn reached, and saved 7 turns of a 23-turn conversation
+*with `complete: true`* — a silent, plausible-looking wrong answer.
+
+Measured on a cold reload of a 23-turn conversation: `scrollHeight`
+starts at 4011 with 10 units mounted and grows in bursts (+2726,
++1113, +2744, +4589, …) over 13 scroll-and-wait rounds, about 9
+seconds, before settling at 20960.  Quiet rounds occur *between* those
+bursts, one at a time.
+
+So the climb ends only after `QUIET_ROUNDS` (4) consecutive rounds
+with no movement, no `scrollHeight` growth, and no new units, and it
+waits longer after a quiet round than after a productive one.  Do not
+lower that constant to make captures faster — a single quiet round
+happens routinely in the middle of a healthy climb.
+
+Also: do not jump straight to `-scrollHeight` to reach the top.  It
+clamps at the end of what is loaded, which is what made the broken
+version look correct on a warm tab.  Warm tabs are the trap here; test
+against a freshly reloaded one, since that is what a user who just
+opened a conversation has.
+
+### `data-chatgpt-search-unit-key` is not an identity
+
+The key looks like `<turn-id>:<index>:<role>`, and the obvious reading is
+that the prefix identifies the turn.  It does not, always.  Two schemes
+coexist — UUID prefixes and `fallback-turn-N` — and **both appeared in
+one conversation on build `d162ff86`** (4 fallback and 6 UUID keys among
+the units mounted at one moment).  Some whole conversations use nothing
+but fallback keys.
+
+In a `fallback-turn-N` key, N is the unit's index **within the mounted
+window**, not within the conversation.  Across a climb the same message
+therefore carries different keys at different scroll positions, and two
+different messages collide on one key.  Keyed that way, a capture
+duplicates some rounds and loses others — one 6-round conversation saved
+with a round repeated verbatim and its opening prompt replaced by a copy
+of a later one.
+
+Use `data-chatgpt-search-message-ids` instead: real UUIDs, present on
+both roles (the assistant unit repeats its own id, so take the first
+token).  `keyOf()` falls back to `data-chatgpt-selection-message-id`,
+then to the turn container's `data-turn-key` plus the role.
+
+The earlier handoff note (`ai/2026-09-25-chatgpt-changes.md`) describes
+fallback keys as appearing on "a conversation whose ids had not settled
+yet".  That reading does not hold on this build — treat fallback keys as
+a normal state, not a transient one.
+
+### Turn order cannot come from the order units were seen
+
+Because the climb goes newest-first, and because the window around any
+scroll position mounts several units at once, neither insertion order
+nor per-round ordering gives conversation order.
+
+`collect()` measures each unit's offset within the scrolled content
+(`getBoundingClientRect().top - containerTop + scrollTop`) and sorts
+by it at the end.  That quantity is invariant under scrolling and
+stable when older turns load, because a `column-reverse` container
+anchors at the bottom.  The measurement is refreshed on every sighting
+— an early one is taken while less is mounted and is less accurate.
+
+### The conversation scroll container is `column-reverse`
+
+`[data-app-action-timeline-scroll]` has `scrollTop === 0` at the
+*newest* turn and a *negative* scrollTop toward the oldest (observed:
+`-18719` with `scrollHeight` 19404).  `scrollHeight` also changes while
+scrolling, because turns mount and unmount.
+
+Code carrying the usual assumptions — `scrollTop >= 0`, bottom means
+`scrollTop === scrollHeight - clientHeight`, `scrollHeight` is stable —
+misbehaves without erroring.  What holds in both directions, and all
+the sweep relies on, is that increasing `scrollTop` moves toward the
+newest turn.
+
+### Code blocks have no `<pre>`, so converters drop every newline
+
+A code block is now `div.CodeBlock > [data-markdown-copy="exclude"] +
+div > code`.  A `<code>` with no `<pre>` ancestor is *inline* code by
+HTML semantics, so pandoc emits inline verbatim and the whole block
+collapses to one line with the newlines gone.  It reads as ChatGPT
+having written a bad code block, not as a scraping bug.
+
+`clean()` in `content-chatgpt.js` wraps any multi-line `<code>` in a
+`<pre>` and lifts the language label off the action bar first.  It also
+resets `className` on every `<code>`: a converter reads the first class
+as the language name, which would otherwise be the Tailwind utility
+`whitespace-pre!`, yielding `#+begin_src whitespace-pre!`.
+
+Related: pandoc converts an inline `<svg>` into an `<img>` with a
+base64 `data:` URI, hundreds of characters of noise per decorative
+icon.  Icons are removed in the page by `clean()`, and
+`browser-gt--strip-svg` removes any that survive before pandoc runs.
 
 ## YouTube specifically
 

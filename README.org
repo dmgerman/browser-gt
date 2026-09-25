@@ -198,6 +198,36 @@ permanently loaded.
 | Emacs: add video for later             | YouTube pages / links        | appends a TODO entry with metadata to the videos file          |
 | Emacs: save YouTube transcript         | YouTube pages / links        | runs =yt-dlp= and writes an org file with clickable timestamps |
 
+** Saving a ChatGPT conversation
+
+ChatGPT keeps only a handful of turns in the page at a time, discards
+the rest, and fetches older ones as you scroll toward them.  The
+extension therefore climbs from the newest turn to the oldest and
+collects the turns on the way.  Two consequences:
+
+- The page visibly scrolls while the capture runs, and the capture
+  takes a few seconds per screenful -- roughly 27 seconds for a
+  23-turn conversation, longer on a tab that was just opened, since
+  the older turns have to be fetched.  Your scroll position is
+  restored when it finishes.  Do not type in the conversation while
+  it runs.
+- If the oldest turn could not be reached, the capture still saves
+  what it collected, but the file gets a =#+chatgpt_incomplete:= line
+  naming the reason, Emacs warns, and the reply to the browser says
+  =INCOMPLETE=.  A file without that line held every turn that was in
+  the conversation.
+
+The saved file also records =#+chatgpt_build:=, the build id ChatGPT
+reported for the markup the capture was read from.  When a future
+ChatGPT release breaks the capture, that line dates the last build
+that worked.
+
+Code blocks, citation links, and tables are preserved.  The interface
+around a reply -- icons, copy and edit buttons, citation favicons, the
+language label above a code block -- is removed before the HTML leaves
+the page, since =pandoc= would otherwise translate it into the org
+file.
+
 * Keyboard shortcuts
 
 Bind any of the menu actions at =chrome://extensions/shortcuts=.  A

@@ -33,7 +33,15 @@
 ;;
 ;; Payload:
 ;;   { "url": "...", "title": "...",
-;;     "turns": [ { "role": "...", "html": "...", "text": "..." } ] }
+;;     "turns": [ { "role": "...", "html": "...", "text": "..." } ],
+;;     "complete": t/:false, "incompleteReason": "...", "build": "..." }
+;;
+;; ChatGPT virtualizes the conversation — only a few turns are in the DOM at
+;; any time — so the content script scrolls the whole thread to collect the
+;; turns.  `complete' reports whether it reached both ends; when it did not,
+;; the saved file holds only part of the conversation and says so.  Payloads
+;; without the field come from an older extension build and are treated as
+;; complete.
 
 ;;; Code:
 
@@ -97,14 +105,30 @@ Signals an error if pandoc is not found or exits non-zero."
 
 ;; ── Handler ──────────────────────────────────────────────────────────────────
 
+(defun browser-gt-chatgpt--complete-p (payload)
+  "Return non-nil when PAYLOAD reports a complete conversation sweep.
+A missing `:complete' means an extension build that predates the field;
+treat it as complete rather than warning on every capture."
+  (let ((complete (plist-get payload :complete)))
+    (or (null complete) (eq complete t))))
+
 (defun browser-gt-chatgpt--handle-chatgpt (payload)
   "Handle CHATGPT request with PAYLOAD.
-Honours :raise after the conversation has been written to disk."
+Honours :raise after the conversation has been written to disk.
+Reports an incomplete sweep rather than presenting a partial
+conversation as the whole one."
   (browser-gt--require-payload payload)
-  (let ((file (browser-gt-chatgpt--save payload)))
+  (let ((file     (browser-gt-chatgpt--save payload))
+        (complete (browser-gt-chatgpt--complete-p payload)))
     (browser-gt--maybe-raise payload)
     (kill-new file)
-    (browser-gt--ok (format "Saved to %s (path copied to clipboard)" file))))
+    (unless complete
+      (browser-gt--warn "conversation is incomplete (%s): %s"
+                        (or (plist-get payload :incompleteReason) "reason not given")
+                        file))
+    (browser-gt--ok (format "Saved %sto %s (path copied to clipboard)"
+                            (if complete "" "INCOMPLETE conversation ")
+                            file))))
 
 ;; ── Conversation saving ───────────────────────────────────────────────────────
 
@@ -221,7 +245,19 @@ plus any extracted images.  Returns the path of the org file written."
           (insert (format "#+title: %s\n" (browser-gt--sanitize-org-meta title)))
           (insert (format "#+chatgpt_id: %s\n" (browser-gt--sanitize-org-meta id)))
           (insert (format "#+chatgpt_url: %s\n" (browser-gt--sanitize-org-meta url)))
-          (insert (format "#+created: %s\n\n" (format-time-string "%Y-%m-%d %H:%M:%S")))
+          (insert (format "#+created: %s\n" (format-time-string "%Y-%m-%d %H:%M:%S")))
+          ;; ChatGPT's build id, when the page exposed one.  It dates the
+          ;; markup this capture was made from, which is what a future
+          ;; selector breakage needs in order to be placed in time.
+          (when-let* ((build (plist-get payload :build)))
+            (insert (format "#+chatgpt_build: %s\n"
+                            (browser-gt--sanitize-org-meta build))))
+          (unless (browser-gt-chatgpt--complete-p payload)
+            (insert (format "#+chatgpt_incomplete: %s\n"
+                            (browser-gt--sanitize-org-meta
+                             (or (plist-get payload :incompleteReason)
+                                 "the extension could not scroll the whole conversation")))))
+          (insert "\n")
           (insert (browser-gt--make-link url "Open in ChatGPT"))
           (insert "\n\n")
           (insert (format "* %s\n\n" (browser-gt--sanitize-org-meta title)))

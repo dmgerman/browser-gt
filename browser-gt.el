@@ -7,7 +7,7 @@
 ;; Maintainer: Daniel M. German <dmg@turingmachine.org>
 ;; Keywords: comm, tools, browser, org
 ;; URL: https://github.com/dmgerman/browser-gt
-;; Version: 0.95b
+;; Version: 0.95c
 ;; Package-Requires: ((emacs "27.1") (websocket "1.13") (org "9.8"))
 
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -75,7 +75,7 @@
 (declare-function org-roam-capture-    "ext:org-roam" (&rest args))
 (declare-function org-roam-node-create "ext:org-roam" (&rest args))
 
-(defconst browser-gt-version "0.95b"
+(defconst browser-gt-version "0.95c"
   "Current version of the browser-gt package.")
 
 ;;;###autoload
@@ -716,12 +716,18 @@ keep the buffer pinned."
   "Accumulate FRAME bytes for WS; dispatch once a complete message arrives.
 A WebSocket message may be split across many frames (large payloads such
 as page HTML routinely run into the hundreds of KB).  We keep a per-client
-buffer of frame text and only JSON-parse once the FIN bit is set on the
-final frame.  Frames with a `:name' field are requests; frames with a
-`:requestId' field are responses to Emacs-initiated requests.
+buffer of frame bytes and only decode and JSON-parse once the FIN bit is
+set on the final frame.  Frames with a `:name' field are requests; frames
+with a `:requestId' field are responses to Emacs-initiated requests.
 A pending message that would grow past `browser-gt-max-message-bytes'
-disconnects the client instead of growing the accumulator further."
-  (let* ((text       (or (websocket-frame-text frame) ""))
+disconnects the client instead of growing the accumulator further.
+
+The accumulator holds raw bytes, not text: `websocket-frame-text'
+decodes each frame on its own, and a multibyte character split across a
+frame boundary decodes to two invalid halves.  The message then fails to
+parse at exactly the boundary offset, and only for payloads that are both
+large enough to fragment and not pure ASCII."
+  (let* ((text       (or (websocket-frame-payload frame) ""))
          (complete-p (websocket-frame-completep frame))
          (prior-cell (assq ws browser-gt--rx-buffers))
          (combined   (concat (cdr prior-cell) text)))
@@ -752,7 +758,7 @@ disconnects the client instead of growing the accumulator further."
                             browser-gt--rx-buffers)))
       (browser-gt--log "[RECV] %d byte(s)" (length combined))
       (let ((msg (condition-case err
-                     (json-parse-string combined
+                     (json-parse-string (decode-coding-string combined 'utf-8 t)
                                         :object-type 'plist
                                         :array-type 'list
                                         :null-object nil

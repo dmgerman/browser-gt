@@ -3,6 +3,14 @@
 
 * dmg-devel
 
+- Update to ChatGPT's rewrite of its conversation markup, which broke
+  saving a conversation.  
+- Fix the handling of a large message whose text is not pure ASCII.
+  Frames were decoded one at a time, so a character split across a
+  frame boundary became two invalid halves and the whole message
+  failed to parse; Emacs then never answered and the browser reported
+  the request as timed out.  Frames are now accumulated as bytes and
+  decoded once the message is complete.
 - Fix the JSON parse error when saving a YouTube transcript (issue
   #5).  The metadata call let =call-process= merge yt-dlp's standard
   error into the buffer being parsed, so any warning yt-dlp printed

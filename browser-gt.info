@@ -94,6 +94,10 @@ Features
 * In Emacs::
 * Extensibility::
 
+Right-click menu actions
+
+* Saving a ChatGPT conversation::
+
 Querying and controlling the browser from Emacs
 
 * API Enumerating browsers and their tabs::
@@ -305,6 +309,43 @@ Emacs: save page                         any page                       archives
 Emacs: save ChatGPT conversation         chatgpt.com pages              saves the whole conversation as org
 Emacs: add video for later               YouTube pages / links          appends a TODO entry with metadata to the videos file
 Emacs: save YouTube transcript           YouTube pages / links          runs ‘yt-dlp’ and writes an org file with clickable timestamps
+
+* Menu:
+
+* Saving a ChatGPT conversation::
+
+
+File: browser-gt.info,  Node: Saving a ChatGPT conversation,  Up: Right-click menu actions
+
+3.1 Saving a ChatGPT conversation
+=================================
+
+ChatGPT keeps only a handful of turns in the page at a time, discards
+the rest, and fetches older ones as you scroll toward them.  The
+extension therefore climbs from the newest turn to the oldest and
+collects the turns on the way.  Two consequences:
+
+   • The page visibly scrolls while the capture runs, and the capture
+     takes a few seconds per screenful - roughly 27 seconds for a
+     23-turn conversation, longer on a tab that was just opened, since
+     the older turns have to be fetched.  Your scroll position is
+     restored when it finishes.  Do not type in the conversation while
+     it runs.
+   • If the oldest turn could not be reached, the capture still saves
+     what it collected, but the file gets a ‘#+chatgpt_incomplete:’ line
+     naming the reason, Emacs warns, and the reply to the browser says
+     ‘INCOMPLETE’.  A file without that line held every turn that was in
+     the conversation.
+
+   The saved file also records ‘#+chatgpt_build:’, the build id ChatGPT
+reported for the markup the capture was read from.  When a future
+ChatGPT release breaks the capture, that line dates the last build that
+worked.
+
+   Code blocks, citation links, and tables are preserved.  The interface
+around a reply - icons, copy and edit buttons, citation favicons, the
+language label above a code block - is removed before the HTML leaves
+the page, since ‘pandoc’ would otherwise translate it into the org file.
 
 
 File: browser-gt.info,  Node: Keyboard shortcuts,  Next: Per-tab eval consent,  Prev: Right-click menu actions,  Up: Top
@@ -1483,48 +1524,49 @@ YouTube PoToken gating, etc.)  see ‘ai/gotchas.md’.
 
 Tag Table:
 Node: Top247
-Node: Quick setup4211
-Node: Features6363
-Node: In the Web browser6555
-Node: In Emacs7485
-Node: Extensibility10129
-Node: Right-click menu actions10418
-Node: Keyboard shortcuts11921
-Node: Per-tab eval consent12540
-Node: The popup13100
-Node: Querying and controlling the browser from Emacs13860
-Node: API Enumerating browsers and their tabs15255
-Node: Quick helpers19558
-Node: Client names and how they persist23502
-Node: Route URLs through browser-gt26375
-Node: Rewrite URLs before dispatch29865
-Node: Tab management32406
-Node: browser-gt-tab-jump -- completing-read jumper32984
-Node: browser-gt-tab-manager -- buffer view35009
-Node: browser-gt-tab-manager-close-duplicates38260
-Node: Run JavaScript in any tab from Emacs38967
-Node: browser-gt-request39281
-Node: Minimal example43161
-Node: browser-gt-js source blocks44182
-Node: Setup47569
-Node: Requirements47853
-Node: Emacs49887
-Node: yt-dlp command lines55164
-Node: Chrome extension56695
-Node: Firefox extension57574
-Node: What works the same in both extensions58607
-Node: What differs59410
-Node: Customising60021
-Node: Security60738
-Node: Sending content from the Web browser to Emacs61556
-Node: Querying and controlling tabs from Emacs62344
-Node: Evaluating JavaScript in tabs63120
-Node: Pausing the bridge without uninstalling64339
-Node: The WebSocket itself64757
-Node: Troubleshooting65831
-Node: License67163
-Node: Info manual67344
-Node: Adding a new action or modifying the protocol68379
+Node: Quick setup4272
+Node: Features6424
+Node: In the Web browser6616
+Node: In Emacs7546
+Node: Extensibility10190
+Node: Right-click menu actions10479
+Node: Saving a ChatGPT conversation12026
+Node: Keyboard shortcuts13636
+Node: Per-tab eval consent14255
+Node: The popup14815
+Node: Querying and controlling the browser from Emacs15575
+Node: API Enumerating browsers and their tabs16970
+Node: Quick helpers21273
+Node: Client names and how they persist25217
+Node: Route URLs through browser-gt28090
+Node: Rewrite URLs before dispatch31580
+Node: Tab management34121
+Node: browser-gt-tab-jump -- completing-read jumper34699
+Node: browser-gt-tab-manager -- buffer view36724
+Node: browser-gt-tab-manager-close-duplicates39975
+Node: Run JavaScript in any tab from Emacs40682
+Node: browser-gt-request40996
+Node: Minimal example44876
+Node: browser-gt-js source blocks45897
+Node: Setup49284
+Node: Requirements49568
+Node: Emacs51602
+Node: yt-dlp command lines56879
+Node: Chrome extension58410
+Node: Firefox extension59289
+Node: What works the same in both extensions60322
+Node: What differs61125
+Node: Customising61736
+Node: Security62453
+Node: Sending content from the Web browser to Emacs63271
+Node: Querying and controlling tabs from Emacs64059
+Node: Evaluating JavaScript in tabs64835
+Node: Pausing the bridge without uninstalling66054
+Node: The WebSocket itself66472
+Node: Troubleshooting67546
+Node: License68878
+Node: Info manual69059
+Node: Adding a new action or modifying the protocol70094
 
 End Tag Table
 
