@@ -31,10 +31,10 @@ JSON text frames over a single WebSocket on =127.0.0.1:9130=.  Two shapes:
 
 #+begin_src js
 // Request
-{ "id": "<uuid>", "name": "ORG_CAPTURE", "payload": { ... } }
+{ "id": "<id>", "name": "ORG_CAPTURE", "payload": { ... } }
 
 // Response
-{ "requestId": "<uuid>", "payload": { ... } }
+{ "requestId": "<id>", "payload": { ... } }
 #+end_src
 
 Distinguished by which key is present.  Request names are
@@ -87,7 +87,7 @@ Browser → Emacs (right-click, popup, hotkey, content-script relay):
 
 Emacs → browser:
 
-1. =browser-gt-request= / =-async= generates a UUID, registers a
+1. =browser-gt-request= / =-async= generates an opaque request id, registers a
    callback, sends the frame.
 2. Offscreen doc receives, asks the service worker to dispatch
    (=handlers.js= =dispatchEmacsRequest=).

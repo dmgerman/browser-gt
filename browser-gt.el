@@ -30,8 +30,8 @@
 ;; Provides a local WebSocket server that exchanges JSON frames with a
 ;; Chrome (MV3) extension.  Frames carry one of two shapes:
 ;;
-;;   Request : { "id": "<uuid>", "name": "NAME",   "payload": {...} }
-;;   Response: { "requestId": "<uuid>",            "payload": {...} }
+;;   Request : { "id": "<id>", "name": "NAME",   "payload": {...} }
+;;   Response: { "requestId": "<id>",            "payload": {...} }
 ;;
 ;; Request names are SCREAMING_SNAKE_CASE.  Incoming requests are
 ;; dispatched to handlers registered with
@@ -1317,6 +1317,25 @@ must be changed together.")
     (when msg
       (browser-gt--warn "%s: %s" name msg))))
 
+(defvar browser-gt--request-counter 0
+  "Number of request ids handed out by `browser-gt--new-request-id'.")
+
+(defun browser-gt--new-request-id ()
+  "Return a fresh request id string.
+
+A request id only has to be unique among this Emacs session's
+outstanding requests -- the extension echoes it back verbatim as
+`requestId' and nothing persists it -- so the process id plus a
+counter is enough.
+
+This deliberately does not use `org-id-uuid', which was measured
+on this path: it formats `recent-keys' (up to 300 keys) and six
+other values into an md5 input, and that allocation sometimes
+lands a GC pause between the caller and the write, which shows up
+as a slow response for a request that had not even been sent yet."
+  (setq browser-gt--request-counter (1+ browser-gt--request-counter))
+  (format "%d-%d" (emacs-pid) browser-gt--request-counter))
+
 (defun browser-gt-request-async (name payload callback &optional client)
   "Send a request NAME with PAYLOAD to the browser; invoke CALLBACK on response.
 CALLBACK receives the decoded response payload (a plist).  If the
@@ -1337,7 +1356,7 @@ sole connected client; when more than one is connected, CALLBACK is
 invoked with a status:error payload and nil is returned."
   (pcase (browser-gt--target-for client name)
     (`(ok . ,ws)
-     (let* ((id         (org-id-uuid))
+     (let* ((id         (browser-gt--new-request-id))
             (hint-timer (browser-gt--schedule-consent-hint name))
             (wrapped    (lambda (response)
                           (when (timerp hint-timer)
