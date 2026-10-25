@@ -256,6 +256,41 @@ const SHAPE_ADAPTERS = {
       id);
   },
 
+  // { id: 123, index: 0, windowId?: 7 } -> chrome.tabs.move(123, {...})
+  //
+  // INDEX is the zero-based position inside the target window; -1
+  // means "after the last tab".  WINDOWID moves the tab to another
+  // window (same profile, same incognito-ness); omitted, the tab stays
+  // in its own window.  Both browsers clamp an index that would put an
+  // unpinned tab among pinned ones (or vice versa), so the returned
+  // Tab — not the requested index — says where the tab actually ended
+  // up.  Chrome returns a Tab for a single id, Firefox an array (empty
+  // when it declined the move); we return one Tab either way.
+  async "move-tab"(payload, _handler, mark = () => {}) {
+    if (!payload || payload.id === undefined) {
+      throw new Error("move-tab: payload.id (tab id) required");
+    }
+    if (payload.index === undefined) {
+      throw new Error("move-tab: payload.index required (-1 for the end)");
+    }
+    const id    = coerceTabId(payload.id, "move-tab");
+    const index = coerceTabIndex(payload.index, "move-tab");
+    const props = (payload.windowId === undefined || payload.windowId === null)
+      ? { index }
+      : { index, windowId: coerceTabId(payload.windowId, "move-tab windowId") };
+    const moved = await safeTabsCall(
+      () => api.tabs.move(id, props),
+      `tabs.move(${id}, ${JSON.stringify(props)})`,
+      id);
+    mark("move");
+    const tab = Array.isArray(moved) ? moved[0] : moved;
+    if (tab) return tab;
+    return await safeTabsCall(
+      () => api.tabs.get(id),
+      `tabs.get(${id})`,
+      id);
+  },
+
   // GET_ALL_TABS with an accurate `lastAccessed' for active tabs.
   //
   // Neither browser is a reliable source for the active tab: Chrome
@@ -341,6 +376,15 @@ const SHAPE_ADAPTERS = {
     return { status: "ok", result };
   },
 };
+
+// Same string tolerance as `coerceTabId', plus -1 ("the end").
+function coerceTabIndex(value, what) {
+  const n = (typeof value === "string" && /^-?\d+$/.test(value.trim()))
+    ? Number(value.trim())
+    : value;
+  if (typeof n === "number" && Number.isInteger(n) && n >= -1) return n;
+  throw new Error(`${what}: index must be an integer >= -1, got ${JSON.stringify(value)}`);
+}
 
 function resolveApi(path) {
   if (!path || typeof path !== "string") {

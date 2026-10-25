@@ -7,7 +7,7 @@
 ;; Maintainer: Daniel M. German <dmg@turingmachine.org>
 ;; Keywords: comm, tools, browser, org
 ;; URL: https://github.com/dmgerman/browser-gt
-;; Version: 0.95c
+;; Version: 0.96
 ;; Package-Requires: ((emacs "27.1") (websocket "1.13") (org "9.8"))
 
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -60,7 +60,6 @@
 
 (require 'websocket)
 (require 'json)
-(require 'org-id)
 (require 'cl-lib)
 (require 'subr-x)
 
@@ -75,7 +74,7 @@
 (declare-function org-roam-capture-    "ext:org-roam" (&rest args))
 (declare-function org-roam-node-create "ext:org-roam" (&rest args))
 
-(defconst browser-gt-version "0.95c"
+(defconst browser-gt-version "0.96"
   "Current version of the browser-gt package.")
 
 ;;;###autoload
@@ -1328,13 +1327,21 @@ outstanding requests -- the extension echoes it back verbatim as
 `requestId' and nothing persists it -- so the process id plus a
 counter is enough.
 
+The counter is zero-padded to six digits so that sorting ids as
+strings -- which is what one ends up doing to a log -- matches the
+order the requests were sent in.  Ids are only ordered within one
+session: the pid prefix is not increasing and the counter restarts
+at 1.  Past 999999 requests the padding just widens, and ids stay
+unique but no longer sort; that is a million requests in one Emacs
+session, and correctness does not depend on the order.
+
 This deliberately does not use `org-id-uuid', which was measured
 on this path: it formats `recent-keys' (up to 300 keys) and six
 other values into an md5 input, and that allocation sometimes
 lands a GC pause between the caller and the write, which shows up
 as a slow response for a request that had not even been sent yet."
   (setq browser-gt--request-counter (1+ browser-gt--request-counter))
-  (format "%d-%d" (emacs-pid) browser-gt--request-counter))
+  (format "%d-%06d" (emacs-pid) browser-gt--request-counter))
 
 (defun browser-gt-request-async (name payload callback &optional client)
   "Send a request NAME with PAYLOAD to the browser; invoke CALLBACK on response.

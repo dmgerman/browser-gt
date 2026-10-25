@@ -1,7 +1,7 @@
 {
   "extension": {
     "name": "browser-gt (Emacs bridge)",
-    "version": "0.95.3",
+    "version": "0.96",
     "description": "Bidirectional WebSocket bridge between a WebExtension (Chrome or Firefox) and a running Emacs instance.",
 
     "options_ui": {
@@ -19,7 +19,7 @@
   "extensionTargets": {
     "chrome": {
       "manifest_version": 3,
-      "version_name": "0.95c",
+      "version_name": "0.96",
       "permissions": [
         "activeTab",
         "contextMenus",
@@ -52,7 +52,7 @@
     },
     "firefox": {
       "manifest_version": 2,
-      "version": "0.95c",
+      "version": "0.96",
       "permissions": [
         "activeTab",
         "contextMenus",
@@ -228,6 +228,7 @@
     { "name": "OPEN_INCOGNITO_TAB", "api": "chrome.tabs.create", "args-shape": "open-incognito-tab" },
     { "name": "FOCUS_TAB",          "api": "chrome.tabs.update", "args-shape": "focus-tab" },
     { "name": "CLOSE_TAB",          "api": "chrome.tabs.remove", "args-shape": "tab-id" },
+    { "name": "MOVE_TAB",           "api": "chrome.tabs.move",   "args-shape": "move-tab" },
     { "name": "EVAL_IN_ACTIVE_TAB", "api": "chrome.userScripts.execute", "args-shape": "user-script" }
   ],
 

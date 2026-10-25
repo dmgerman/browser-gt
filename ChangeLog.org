@@ -3,6 +3,11 @@
 
 * dmg-devel
 
+- New request =MOVE_TAB= (=:id=, =:index=, optional =:windowId=)
+  moves a tab to a position in its window, or into another window;
+  =:index -1= means the end.  The reply is the moved tab, whose
+  =index= is where the browser actually put it (pinned and unpinned
+  tabs do not mix).
 - Update to ChatGPT's rewrite of its conversation markup, which broke
   saving a conversation.  
 - Fix the handling of a large message whose text is not pure ASCII.
