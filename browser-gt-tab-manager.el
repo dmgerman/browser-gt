@@ -1876,6 +1876,119 @@ answering `n' aborts the operation."
              (message "Bookmark failed: %s" (error-message-string err))))))))))
   nil)
 
+;; ── Bookmarking a view ─────────────────────────────────────────────────────
+;;
+;; A bookmark on the manager buffer records the view rather than a
+;; position: the active filters, the sort key, and the three column
+;; toggles.  A position would be meaningless, since the tab under point
+;; changes with every refresh.  These are distinct from the tab
+;; bookmarks `b' / `B' make, which point at one tab's URL.
+;;
+;; This uses `bookmark.el' directly: `bookmark-make-record-function'
+;; to record and a `handler' property to restore, so any bookmark front
+;; end built on `bookmark.el' stores and jumps to these without knowing
+;; anything about browser-gt.
+
+(defcustom browser-gt-tab-manager-view-bookmark-prefix "Browser tabs"
+  "Prefix of the default name offered when bookmarking a tab manager view.
+The active filters are appended to it, so several saved views are
+distinguishable in the bookmark list."
+  :type 'string
+  :group 'browser-gt)
+
+(defun browser-gt-tab-manager--view-bookmark-name ()
+  "Return the default bookmark name for the current view.
+Appends the active filters to
+`browser-gt-tab-manager-view-bookmark-prefix'."
+  (if browser-gt-tab-manager--filters
+      (format "%s: %s"
+              browser-gt-tab-manager-view-bookmark-prefix
+              (mapconcat #'browser-gt-tab-manager--filter-description
+                         browser-gt-tab-manager--filters
+                         " "))
+    browser-gt-tab-manager-view-bookmark-prefix))
+
+(defun browser-gt-tab-manager--make-view-record ()
+  "Return a bookmark record describing the current tab manager view.
+Installed as `bookmark-make-record-function' by
+`browser-gt-tab-manager-mode', so \\[bookmark-set] in the manager
+stores the active filters, the sort key, and the URL, Age and
+Client column settings.  Jumping to the bookmark restores them."
+  (let ((name (browser-gt-tab-manager--view-bookmark-name)))
+    `(,name
+      (defaults      . (,name))
+      (handler       . browser-gt-tab-manager-view-bookmark-jump)
+      (filters       . ,browser-gt-tab-manager--filters)
+      (sort          . ,browser-gt-tab-manager--buffer-sort)
+      (show-url      . ,browser-gt-tab-manager--show-url)
+      (show-accessed . ,browser-gt-tab-manager--show-accessed)
+      (client-column . ,browser-gt-tab-manager--client-column-mode))))
+
+(defun browser-gt-tab-manager--open-buffer (setup)
+  "Return the manager buffer in a fresh mode, after calling SETUP in it.
+SETUP runs after `browser-gt-tab-manager-mode' has reset the
+buffer-local view and before the one refresh that fetches the
+tabs, so a restored view costs a single round trip to the
+browsers.  The buffer is not displayed."
+  (unless (browser-gt-connected-clients)
+    (user-error "Browser-gt: no browser connected"))
+  (let ((buf (get-buffer-create "*browser-gt-tab-manager*")))
+    (with-current-buffer buf
+      (browser-gt-tab-manager-mode)
+      (funcall setup)
+      (browser-gt-tab-manager--refresh))
+    buf))
+
+(defun browser-gt-tab-manager--view-buffer (filters sort show-url show-accessed
+                                                    client-column)
+  "Return the manager buffer showing the view FILTERS, SORT, and the toggles.
+See `browser-gt-tab-manager-open-view' for the arguments.  A SORT
+or CLIENT-COLUMN value this version does not know falls back to
+the default rather than failing, so an old bookmark still opens."
+  (browser-gt-tab-manager--open-buffer
+   (lambda ()
+     (setq browser-gt-tab-manager--filters       filters)
+     (setq browser-gt-tab-manager--buffer-sort
+           (and (memq sort browser-gt-tab-manager--sort-cycle) sort))
+     (setq browser-gt-tab-manager--show-url      show-url)
+     (setq browser-gt-tab-manager--show-accessed show-accessed)
+     (setq browser-gt-tab-manager--client-column-mode
+           (if (memq client-column '(auto on off)) client-column 'auto)))))
+
+;;;###autoload
+(defun browser-gt-tab-manager-open-view (filters &optional sort show-url
+                                                  show-accessed client-column)
+  "Open the tab manager showing FILTERS, SORT and the column settings.
+FILTERS is a list of filters in the shape
+`browser-gt-tab-manager--filters' holds them.  SORT is a key of
+`browser-gt-tab-manager--sort-cycle', or nil for
+`browser-gt-tab-manager-sort'.  SHOW-URL non-nil shows full URLs,
+SHOW-ACCESSED non-nil the Age column, and CLIENT-COLUMN is `auto',
+`on', or `off'.  This is the view a bookmark restores, given
+directly, so a command can open a fixed view without a bookmark."
+  (pop-to-buffer
+   (browser-gt-tab-manager--view-buffer filters sort show-url show-accessed
+                                        (or client-column 'auto))))
+
+;;;###autoload
+(defun browser-gt-tab-manager-view-bookmark-jump (bookmark)
+  "Restore the tab manager view saved in BOOKMARK.
+Reads the filters, sort key and column settings from the record,
+applies them to a freshly fetched tab list, and leaves the
+manager buffer current for `bookmark-jump' to display.  The tabs
+are those open now, not those open when the bookmark was stored.
+
+A `by-window' filter names a window by its browser-assigned id,
+which does not survive a browser restart; after one such a filter
+matches nothing, and the header shows it as `CLIENT:?'."
+  (set-buffer
+   (browser-gt-tab-manager--view-buffer
+    (bookmark-prop-get bookmark 'filters)
+    (bookmark-prop-get bookmark 'sort)
+    (bookmark-prop-get bookmark 'show-url)
+    (bookmark-prop-get bookmark 'show-accessed)
+    (bookmark-prop-get bookmark 'client-column))))
+
 ;; ── Built-in filter entries ────────────────────────────────────────────────
 ;;
 ;; Readers offer the attributes of the tabs currently on display, so a
@@ -2179,11 +2292,19 @@ With a prefix argument the filter is negated, so
 has looked at for a week.  Filters survive \\[revert-buffer]; the header
 line lists them, as \"[domain=github.com !flag=pinned]\".
 
+\\[bookmark-set] stores the current view — the active filters, the
+sort key, and the URL, Age and Client column settings — as a
+bookmark.  Jumping to it opens the manager with that view over
+the tabs open at the time.  This is not the same as \\[browser-gt-tab-manager-mark-bookmark] and
+\\[browser-gt-tab-manager-bookmark-immediate], which bookmark one tab's URL.
+
 Row id is (INSTANCE . TAB-ID); the same tab keeps its point
 position across refreshes even when the surrounding list has
 changed."
   (setq tabulated-list-padding 2)
   (setq revert-buffer-function #'browser-gt-tab-manager--refresh)
+  (setq-local bookmark-make-record-function
+              #'browser-gt-tab-manager--make-view-record)
   ;; `define-derived-mode' kills all buffer-locals; initialise the
   ;; marks hash here so it exists before any mark command runs.
   (setq-local browser-gt-tab-manager--marks
@@ -2199,13 +2320,7 @@ with `g'.  `browser-gt-default-client' is ignored — every connected
 browser is represented; use the buffer-local filters (`/') or the
 consult-style narrow-by-typing to focus on a subset."
   (interactive)
-  (unless (browser-gt-connected-clients)
-    (user-error "Browser-gt: no browser connected"))
-  (let ((buf (get-buffer-create "*browser-gt-tab-manager*")))
-    (with-current-buffer buf
-      (browser-gt-tab-manager-mode)
-      (browser-gt-tab-manager--refresh))
-    (pop-to-buffer buf)))
+  (pop-to-buffer (browser-gt-tab-manager--open-buffer #'ignore)))
 
 (provide 'browser-gt-tab-manager)
 

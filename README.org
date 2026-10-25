@@ -738,8 +738,8 @@ versa) replaces the tag rather than layering.
 Bookmarks are stored via =browser-gt-tab-manager-bookmark-function=
 (a defcustom; default writes a =bookmark-store= record with a
 browser-gt-owned handler that calls =browse-url= on jump).  Vanilla
-=bookmark-set= alone cannot make URL bookmarks -- it captures the
-current buffer's location -- so browser-gt provides its own tiny
+=bookmark-set= cannot make a URL bookmark for one tab -- in this
+buffer it saves the view, see below -- so browser-gt provides its own tiny
 handler function and does not rely on external autoloads.  Users
 of bookmark+ can override the defcustom to plug in
 =bmkp-jump-url-browse= for a nicer =*Bookmark List*= classification.
@@ -749,6 +749,31 @@ title) and asks before overwriting an existing bookmark.  Batch
 bookmarking via =b= + =x= silently suffixes =<2>=, =<3>=, ... on
 name collisions so no existing bookmark is overwritten during a
 batch.
+
+**** Bookmarking a view
+
+=C-x r m= (=bookmark-set=) in the manager saves the /view/ rather
+than a tab: the active filters, the sort key, and the URL, Age
+and Client column settings.  The default name is
+=browser-gt-tab-manager-view-bookmark-prefix= (="Browser tabs"=)
+followed by the filters, e.g. =Browser tabs: !flag=pinned
+!accessed-within=1d=.  Jumping to it (=C-x r b=, or any front end
+built on =bookmark.el=) opens the manager with that view over the
+tabs open at the time -- a saved "stale tabs" view keeps showing
+whatever is stale today.
+
+The same view can be opened without a bookmark:
+
+#+begin_src emacs-lisp
+(browser-gt-tab-manager-open-view
+ '((:key by-flag :values ("pinned") :negate t)
+   (:key by-accessed-within :values ("1w") :negate t))
+ 'mru)
+#+end_src
+
+A =by-window= filter names a window by the id the browser gave it,
+which does not survive a browser restart; afterwards that filter
+matches nothing and shows as =CLIENT:?= in the header.
 
 *** =browser-gt-tab-manager-close-duplicates=
 

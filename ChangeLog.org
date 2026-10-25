@@ -22,6 +22,10 @@
   when a filter hides a window.
   =browser-gt-tab-manager-set-filter= is gone; its behaviour is the
   =by-regexp= filter.
+- =C-x r m= in the tab manager bookmarks the view -- filters, sort
+  key, and the URL/Age/Client column settings -- and jumping to the
+  bookmark reopens the manager with it over the tabs open then.
+  =browser-gt-tab-manager-open-view= opens such a view directly.
 - Update to ChatGPT's rewrite of its conversation markup, which broke
   saving a conversation.  
 - Fix the handling of a large message whose text is not pure ASCII.
