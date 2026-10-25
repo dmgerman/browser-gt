@@ -667,8 +667,9 @@ Opens =*browser-gt-tab-manager*= in =browser-gt-tab-manager-mode=
 (a =tabulated-list-mode= derivative).  One line per tab, dired-style
 marking, persistent so you can keep it around and refresh with =g=.
 
-The header line shows the current sort key, any active regex
-filter, whether URL view is on, and the tab count.
+The header line shows the current sort key, the active filters,
+whether URL view is on, and the tab count (=SHOWN/TOTAL= while a
+filter hides some).
 
 Columns: an optional Client column, the =[flags]= column, the
 =Age= column (relative time since last access; shown by default,
@@ -694,12 +695,42 @@ Keymap:
 | =r=          | cycle Client column visibility: =auto= -> =on= -> =off=     |
 | =a=          | toggle the Age column (relative time since last access)   |
 | =w=          | copy the current tab's URL to the kill ring               |
-| =/=          | regex filter on title / URL / domain (empty clears)       |
+| =/=          | add a filter on any tab attribute, or remove filters      |
+| =C-u /=      | add a negated filter ("filter out")                       |
+| =\=          | remove one active filter                                  |
 | ~= d~        | mark all duplicate tabs for deletion                      |
 | =g=          | refresh from every connected browser                      |
 | =n= / =p=    | next / previous line                                      |
 | =q=          | quit-window                                               |
 | =?=          | =describe-mode= (full binding list, docstring, examples)  |
+
+Filters narrow the view by any tab attribute.  =/= asks for the
+attribute, then for its value:
+
+| Filter                 | Value                                                     |
+|------------------------+-----------------------------------------------------------|
+| =by-regexp=            | regexp on title, URL, or domain                           |
+| =by-title-regexp=      | regexp on the title                                       |
+| =by-url-regexp=        | regexp on the full URL                                    |
+| =by-domain=            | one or more hosts                                         |
+| =by-client=            | one or more browsers                                      |
+| =by-window=            | one or more windows, named =CLIENT:N= as in the Client column |
+| =by-flag=              | =active=, =audible=, =muted=, =pinned=, =incognito=, =discarded= |
+| =by-accessed-within=   | a duration: =30m=, =3h=, =2d=, =1w=                       |
+| =remove-filter=        | removes one active filter (offered only while one is)     |
+| =unfilter=             | clears every filter (offered only while one is active)    |
+
+Each choice is annotated with what it does.  Completion of
+values is over the tabs on display, so a second filter
+completes over what the first one left.  Values within one filter
+widen the selection (=github.com,gitlab.com= at the domain prompt
+keeps both); separate filters narrow it.  With =C-u= a filter is
+negated: =C-u / by-accessed-within 1w= lists the tabs nobody has
+looked at for a week, and =C-u / by-flag pinned= hides pinned
+tabs.  Filters survive =g=, and the header line lists them as
+=[domain=github.com !flag=pinned]=.  The registry is
+=browser-gt-tab-manager-filter-alist=; see its docstring to add
+your own.
 
 Dired one-mark-per-row: pressing =d= on a =B=-marked row (or vice
 versa) replaces the tag rather than layering.

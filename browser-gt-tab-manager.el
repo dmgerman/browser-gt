@@ -49,7 +49,9 @@
 ;;     immediately.  `RET' focuses the tab (does not close the
 ;;     buffer), `M-RET' previews without raising the browser window.
 ;;     `g' refreshes, `s' cycles sort, `w' copies the URL, `/'
-;;     applies a regex filter, `= d' marks duplicates.  See
+;;     adds a filter on any tab attribute (registry:
+;;     `browser-gt-tab-manager-filter-alist'), `\' removes one,
+;;     `= d' marks duplicates.  See
 ;;     `describe-mode' inside the buffer for the full binding list.
 ;;
 ;;   `browser-gt-tab-manager-close-duplicates'
@@ -982,10 +984,36 @@ The id is a cons of the tab's browser-gt-instance UUID and its numeric
 tab id; that pair is unique across every connected browser and stable
 across refreshes.")
 
-(defvar-local browser-gt-tab-manager--filter nil
-  "Buffer-local regex filter for `browser-gt-tab-manager-mode', or nil.
-When non-nil, only tabs whose title, URL, or domain match the
-regex survive the refresh.  Set via `browser-gt-tab-manager-set-filter'.")
+(defvar browser-gt-tab-manager-filter-alist nil
+  "Filter registry for `browser-gt-tab-manager-mode'.
+Each entry is (KEY :name STRING :reader FN :predicate FN :doc STRING
+\[:describe FN]).
+
+The :reader takes no arguments and returns a LIST of values, even
+when it read only one; it runs in the manager buffer, so it can
+offer the attributes of the tabs on display as completions.
+:predicate is called as (TAB VALUE) with a single value and
+returns non-nil when TAB matches it — combining the values, and
+negating the result, is done once by
+`browser-gt-tab-manager--filter-matches-p' rather than in every
+predicate.  The optional :describe turns one value into the text
+the header line shows for it; without it the value is printed
+with `format'.
+
+A tab is displayed when every active filter matches it, and a
+filter matches when ANY of its values does: values within one
+attribute widen the selection, separate filters narrow it.  The
+entries provided with this file are registered next to the
+keymap.")
+
+(defvar-local browser-gt-tab-manager--filters nil
+  "Active filters in this buffer, in the order they were added.
+Each element is a plist (:key KEY :values LIST :negate BOOLEAN),
+where KEY names an entry in `browser-gt-tab-manager-filter-alist'.
+A key may appear more than once, so \"domain github.com\" and
+\"title matches review\" can be refined by a second title regexp
+rather than one replacing the other.  The list survives `g': a
+refresh re-fetches the tabs and filters them again.")
 
 (defvar-local browser-gt-tab-manager--buffer-sort nil
   "Current sort key for this buffer.
@@ -1049,14 +1077,50 @@ closed; the numbering re-derives from the current `windowId' set.")
   "Return the tabulated-list-id key for TAB."
   (cons (or (plist-get tab :browser-gt-instance) "?") (plist-get tab :id)))
 
-(defun browser-gt-tab-manager--tab-matches-filter-p (tab regex)
-  "Return non-nil when TAB's title, url, or domain matches REGEX."
-  (let ((title  (or (plist-get tab :title) ""))
-        (url    (or (plist-get tab :url)   ""))
-        (domain (browser-gt-tab-manager--url-host (plist-get tab :url))))
-    (or (string-match-p regex title)
-        (string-match-p regex url)
-        (string-match-p regex domain))))
+(defun browser-gt-tab-manager--filter-matches-p (tab filter)
+  "Return non-nil when TAB satisfies FILTER.
+FILTER matches when its predicate holds for ANY of its values, so
+several values of one attribute widen the selection.  A filter
+carrying a non-nil :negate matches exactly the tabs it would
+otherwise reject.  A key with no registry entry matches
+everything, so a filter left over from a removed registration
+narrows nothing instead of emptying the buffer."
+  (let* ((entry (alist-get (plist-get filter :key)
+                           browser-gt-tab-manager-filter-alist))
+         (predicate (plist-get entry :predicate))
+         (matched (or (null predicate)
+                      (and (seq-some (lambda (value)
+                                       (funcall predicate tab value))
+                                     (plist-get filter :values))
+                           t))))
+    (if (plist-get filter :negate) (not matched) matched)))
+
+(defun browser-gt-tab-manager--apply-filters (tabs filters)
+  "Return TABS narrowed by every filter in FILTERS.
+A tab is kept only when every filter matches it, so separate
+filters narrow the selection while the values within one filter
+widen it."
+  (seq-filter
+   (lambda (tab)
+     (seq-every-p (lambda (filter)
+                    (browser-gt-tab-manager--filter-matches-p tab filter))
+                  filters))
+   tabs))
+
+(defun browser-gt-tab-manager--filter-description (filter)
+  "Return a compact display string for FILTER.
+The `by-' prefix is dropped from the key and the values are
+joined with commas, giving forms like \"domain=github.com,gitlab.com\"
+and \"!flag=pinned\"."
+  (let* ((key      (plist-get filter :key))
+         (name     (symbol-name key))
+         (describe (or (plist-get (alist-get key browser-gt-tab-manager-filter-alist)
+                                  :describe)
+                       (lambda (value) (format "%s" value)))))
+    (format "%s%s=%s"
+            (if (plist-get filter :negate) "!" "")
+            (if (string-prefix-p "by-" name) (substring name 3) name)
+            (mapconcat describe (plist-get filter :values) ","))))
 
 (defun browser-gt-tab-manager--format-relative-time (ms-timestamp)
   "Return a short human-readable string for MS-TIMESTAMP relative to now.
@@ -1200,15 +1264,10 @@ refresh.  Called from `revert-buffer' (bound to `g' by
 state (execute, immediate close, filter change, sort cycle, URL
 toggle)."
   (let* ((raw       (browser-gt-browser-tabs))
-         (filter    browser-gt-tab-manager--filter)
+         (filters   browser-gt-tab-manager--filters)
          (show-url  browser-gt-tab-manager--show-url)
          (show-acc  browser-gt-tab-manager--show-accessed)
-         (kept      (if filter
-                        (seq-filter (lambda (tab)
-                                      (browser-gt-tab-manager--tab-matches-filter-p
-                                       tab filter))
-                                    raw)
-                      raw))
+         (kept      (browser-gt-tab-manager--apply-filters raw filters))
          (sort-key  (or browser-gt-tab-manager--buffer-sort
                         browser-gt-tab-manager-sort))
          (sorted    (browser-gt-tab-manager--sort-tabs kept sort-key))
@@ -1228,8 +1287,12 @@ toggle)."
          (multi-window-browsers
           (browser-gt-tab-manager--multi-window-browsers sorted))
          (target    (tabulated-list-get-id)))
+    ;; Numbered over every tab, not just the ones the filters keep, so
+    ;; a window's `:N' does not shift when a filter hides another
+    ;; window — and a `window=chrome:1' filter keeps naming the window
+    ;; it was created on.
     (setq browser-gt-tab-manager--window-numbers
-          (browser-gt-tab-manager--compute-window-numbers sorted))
+          (browser-gt-tab-manager--compute-window-numbers raw))
     (setq browser-gt-tab-manager--tabs
           (mapcar (lambda (tab)
                     (cons (browser-gt-tab-manager--row-id tab) tab))
@@ -1272,18 +1335,25 @@ toggle)."
                      (propertize
                       (symbol-name browser-gt-tab-manager--client-column-mode)
                       'face 'font-lock-keyword-face)))
-           (when filter
+           (when filters
              (concat (propertize "  |  Filter: " 'face 'shadow)
-                     (propertize (format "/%s/" filter)
-                                 'face 'font-lock-warning-face)))
+                     (propertize
+                      (format "[%s]"
+                              (mapconcat #'browser-gt-tab-manager--filter-description
+                                         filters " "))
+                      'face 'font-lock-warning-face)))
            (when (and clients (not show-c))
              (concat (propertize "  |  " 'face 'shadow)
                      (propertize (car clients)
                                  'face 'browser-gt-tab-manager-client-face)))
            (propertize
-            (format "  |  %d tab%s"
-                    (length sorted)
-                    (if (= (length sorted) 1) "" "s"))
+            (if filters
+                (format "  |  %d/%d tab%s"
+                        (length sorted) (length raw)
+                        (if (= (length raw) 1) "" "s"))
+              (format "  |  %d tab%s"
+                      (length sorted)
+                      (if (= (length sorted) 1) "" "s")))
             'face 'shadow)))
     ;; Keep mode-name short — the header-line carries the detail.
     (setq mode-name (format "Tabs[%s]" sort-key))
@@ -1605,21 +1675,107 @@ The header line shows `Client:on' or `Client:off' while overridden."
                (message "Copied: %s" url))
       (message "No URL on this line"))))
 
-(defun browser-gt-tab-manager-set-filter (regex)
-  "Filter the buffer to rows whose title, URL, or domain match REGEX.
-Empty input clears the filter.  The current filter is shown in the
-mode line as `/REGEX/'."
+(defun browser-gt-tab-manager--filter-choices ()
+  "Return the choices `browser-gt-tab-manager-filter-by' offers.
+Every entry of `browser-gt-tab-manager-filter-alist', preceded —
+while any filter is active — by the two ways of removing them, so
+`/' is the one place to go to change what is shown."
+  (append (when browser-gt-tab-manager--filters
+            '((remove-filter
+               :name "Remove filter"
+               :doc "Remove one active filter.")
+              (unfilter
+               :name "Unfilter"
+               :doc "Remove every active filter.")))
+          browser-gt-tab-manager-filter-alist))
+
+(defun browser-gt-tab-manager--read-filter-key (prompt)
+  "Read a key from `browser-gt-tab-manager--filter-choices' with PROMPT.
+Each candidate is annotated with its :doc, so the prompt says what
+every filter does without a trip to the docstring."
+  (let* ((choices (browser-gt-tab-manager--filter-choices))
+         (completion-extra-properties
+          (list :annotation-function
+                (lambda (candidate)
+                  (let ((doc (plist-get (alist-get (intern candidate) choices)
+                                        :doc)))
+                    (when doc
+                      (concat (propertize " " 'display '(space :align-to 24))
+                              (propertize doc 'face 'completions-annotations))))))))
+    (intern (completing-read prompt
+                             (mapcar (lambda (e) (symbol-name (car e))) choices)
+                             nil t))))
+
+(defun browser-gt-tab-manager-filter-by (key &optional negate)
+  "Add the filter KEY to the current buffer, or remove filters.
+KEY is read from `browser-gt-tab-manager-filter-alist'.  Its reader
+may return several values, and a tab matches the filter when any
+one of them matches, so several domains widen the selection.
+
+The filter is ADDED, not substituted: applying the same key again
+narrows further rather than replacing what is already in force.
+Remove one with `browser-gt-tab-manager-filter-remove'.
+
+With a prefix argument, NEGATE is non-nil and the filter selects
+exactly the tabs it would otherwise reject.
+
+While any filter is active two special KEYs are offered as well:
+`remove-filter' asks which one filter to remove, and `unfilter'
+clears every one."
   (interactive
-   (list (read-string
-          (format "Filter regex (%s): "
-                  (if browser-gt-tab-manager--filter
-                      (format "current: /%s/, empty clears"
-                              browser-gt-tab-manager--filter)
-                    "empty clears"))
-          nil nil "")))
-  (setq browser-gt-tab-manager--filter
-        (and (stringp regex) (not (string-empty-p regex)) regex))
-  (browser-gt-tab-manager--refresh))
+   (list (browser-gt-tab-manager--read-filter-key
+          (if current-prefix-arg "Filter out by: " "Filter by: "))
+         current-prefix-arg)
+   browser-gt-tab-manager-mode)
+  (pcase key
+    ('remove-filter
+     (call-interactively #'browser-gt-tab-manager-filter-remove))
+    ('unfilter
+     (setq browser-gt-tab-manager--filters nil)
+     (browser-gt-tab-manager--refresh)
+     (message "Removed every filter"))
+    (_ (browser-gt-tab-manager--add-filter key negate))))
+
+(defun browser-gt-tab-manager--add-filter (key negate)
+  "Read values for the filter KEY and add it, negated when NEGATE is non-nil."
+  (let* ((entry (or (alist-get key browser-gt-tab-manager-filter-alist)
+                    (user-error "Unknown filter: %s" key)))
+         (values (funcall (plist-get entry :reader)))
+         (filter (list :key key
+                       :values values
+                       :negate (and negate t))))
+    (unless values
+      (user-error "No value given; filter not added"))
+    ;; An identical filter would narrow nothing and clutter the
+    ;; header, so adding one again is a no-op rather than a
+    ;; duplicate entry.
+    (unless (member filter browser-gt-tab-manager--filters)
+      (setq browser-gt-tab-manager--filters
+            (append browser-gt-tab-manager--filters (list filter))))
+    (browser-gt-tab-manager--refresh)))
+
+(defun browser-gt-tab-manager-filter-remove (description)
+  "Remove the single active filter named DESCRIPTION.
+Completion offers the filters currently in force, in the form the
+header line shows them.  Use the `unfilter' choice of
+`browser-gt-tab-manager-filter-by' to clear all of them at once."
+  (interactive
+   (progn
+     (unless browser-gt-tab-manager--filters
+       (user-error "No active filters"))
+     (list (completing-read
+            "Remove filter: "
+            (mapcar #'browser-gt-tab-manager--filter-description
+                    browser-gt-tab-manager--filters)
+            nil t)))
+   browser-gt-tab-manager-mode)
+  (setq browser-gt-tab-manager--filters
+        (seq-remove (lambda (filter)
+                      (equal description
+                             (browser-gt-tab-manager--filter-description filter)))
+                    browser-gt-tab-manager--filters))
+  (browser-gt-tab-manager--refresh)
+  (message "Removed filter: %s" description))
 
 (defun browser-gt-tab-manager-mark-duplicates ()
   "Mark duplicate tabs (older copies) for deletion.
@@ -1720,6 +1876,188 @@ answering `n' aborts the operation."
              (message "Bookmark failed: %s" (error-message-string err))))))))))
   nil)
 
+;; ── Built-in filter entries ────────────────────────────────────────────────
+;;
+;; Readers offer the attributes of the tabs currently on display, so a
+;; second filter completes over what the first one left.
+
+(defun browser-gt-tab-manager--shown-tabs ()
+  "Return the tab plists currently displayed in this buffer."
+  (mapcar #'cdr browser-gt-tab-manager--tabs))
+
+(defun browser-gt-tab-manager--distinct (fn)
+  "Return the distinct non-empty values of FN over the shown tabs, sorted."
+  (sort (delete-dups
+         (seq-remove (lambda (v) (or (null v) (equal v "")))
+                     (mapcar fn (browser-gt-tab-manager--shown-tabs))))
+        #'string-lessp))
+
+(defconst browser-gt-tab-manager--flag-names
+  '("active" "audible" "muted" "pinned" "incognito" "discarded")
+  "Flag names accepted by the `by-flag' filter.")
+
+(defun browser-gt-tab-manager--tab-flag-p (tab flag)
+  "Return non-nil when TAB has FLAG, a name from `--flag-names'."
+  (pcase flag
+    ("active"    (plist-get tab :active))
+    ("audible"   (plist-get tab :audible))
+    ("muted"     (plist-get (plist-get tab :mutedInfo) :muted))
+    ("pinned"    (plist-get tab :pinned))
+    ("incognito" (plist-get tab :incognito))
+    ("discarded" (plist-get tab :discarded))))
+
+(defun browser-gt-tab-manager--window-label (window)
+  "Return the `CLIENT:N' label for WINDOW, a (BROWSER . WINDOWID) cons.
+N is the index the window carries in the Client column; a window
+that has since closed reads `CLIENT:?'."
+  (let ((n (cdr (assoc window browser-gt-tab-manager--window-numbers))))
+    (format "%s:%s" (car window) (if n n "?"))))
+
+(defun browser-gt-tab-manager--read-windows ()
+  "Read one or more windows among those shown; return (BROWSER . WINDOWID) conses."
+  (let* ((windows (delete-dups
+                   (mapcar (lambda (tab)
+                             (cons (plist-get tab :browser-gt-browser)
+                                   (plist-get tab :windowId)))
+                           (browser-gt-tab-manager--shown-tabs))))
+         (table   (mapcar (lambda (w)
+                            (cons (browser-gt-tab-manager--window-label w) w))
+                          windows)))
+    (mapcar (lambda (label) (cdr (assoc label table)))
+            (completing-read-multiple
+             "Windows (comma-separated): "
+             (sort (mapcar #'car table) #'string-lessp)
+             nil t))))
+
+(defun browser-gt-tab-manager--duration-seconds (spec)
+  "Return SPEC, a duration like \"30m\", \"3h\", \"2d\", \"1w\", in seconds.
+Signals a `user-error' on anything else, so a typo is reported
+when the filter is added rather than silently matching nothing."
+  (let ((text (string-trim (or spec ""))))
+    (unless (string-match "\\`\\([0-9]+\\)\\([mhdw]\\)\\'" text)
+      (user-error "Cannot read `%s' as a duration; use 30m, 3h, 2d, or 1w" text))
+    (* (string-to-number (match-string 1 text))
+       (pcase (match-string 2 text)
+         ("m" 60) ("h" 3600) ("d" 86400) ("w" 604800)))))
+
+(add-to-list 'browser-gt-tab-manager-filter-alist
+             (cons 'by-regexp
+                   (list :name "Regexp"
+                         ;; One regexp per filter: a comma is an
+                         ;; ordinary character inside a regexp, so
+                         ;; splitting on it would corrupt the pattern.
+                         ;; Apply the filter twice to narrow further.
+                         :reader (lambda ()
+                                   (list (read-regexp "Title, URL, or domain matches")))
+                         :predicate
+                         (lambda (tab regexp)
+                           (let ((url (or (plist-get tab :url) "")))
+                             (or (string-match-p regexp (or (plist-get tab :title) ""))
+                                 (string-match-p regexp url)
+                                 (string-match-p regexp
+                                                 (browser-gt-tab-manager--url-host url)))))
+                         :doc "Show only tabs whose title, URL, or domain \
+matches a regexp.")))
+
+(add-to-list 'browser-gt-tab-manager-filter-alist
+             (cons 'by-title-regexp
+                   (list :name "Title regexp"
+                         :reader (lambda () (list (read-regexp "Title matches")))
+                         :predicate
+                         (lambda (tab regexp)
+                           (string-match-p regexp (or (plist-get tab :title) "")))
+                         :doc "Show only tabs whose title matches a regexp.")))
+
+(add-to-list 'browser-gt-tab-manager-filter-alist
+             (cons 'by-url-regexp
+                   (list :name "URL regexp"
+                         :reader (lambda () (list (read-regexp "URL matches")))
+                         :predicate
+                         (lambda (tab regexp)
+                           (string-match-p regexp (or (plist-get tab :url) "")))
+                         :doc "Show only tabs whose full URL matches a regexp.")))
+
+(add-to-list 'browser-gt-tab-manager-filter-alist
+             (cons 'by-domain
+                   (list :name "Domain"
+                         :reader (lambda ()
+                                   (completing-read-multiple
+                                    "Domains (comma-separated): "
+                                    (browser-gt-tab-manager--distinct
+                                     (lambda (tab)
+                                       (browser-gt-tab-manager--url-host
+                                        (plist-get tab :url))))
+                                    nil t))
+                         :predicate
+                         (lambda (tab domain)
+                           (equal domain (browser-gt-tab-manager--url-host
+                                          (plist-get tab :url))))
+                         :doc "Show only tabs on one of the chosen hosts.")))
+
+(add-to-list 'browser-gt-tab-manager-filter-alist
+             (cons 'by-client
+                   (list :name "Client"
+                         :reader (lambda ()
+                                   (completing-read-multiple
+                                    "Browsers (comma-separated): "
+                                    (browser-gt-tab-manager--distinct
+                                     (lambda (tab)
+                                       (plist-get tab :browser-gt-browser)))
+                                    nil t))
+                         :predicate
+                         (lambda (tab client)
+                           (equal client (plist-get tab :browser-gt-browser)))
+                         :doc "Show only tabs owned by one of the chosen \
+browsers.")))
+
+(add-to-list 'browser-gt-tab-manager-filter-alist
+             (cons 'by-window
+                   (list :name "Window"
+                         :reader #'browser-gt-tab-manager--read-windows
+                         :predicate
+                         (lambda (tab window)
+                           (and (equal (car window) (plist-get tab :browser-gt-browser))
+                                (equal (cdr window) (plist-get tab :windowId))))
+                         :describe #'browser-gt-tab-manager--window-label
+                         :doc "Show only tabs in one of the chosen browser \
+windows.")))
+
+(add-to-list 'browser-gt-tab-manager-filter-alist
+             (cons 'by-flag
+                   (list :name "Flag"
+                         :reader (lambda ()
+                                   (completing-read-multiple
+                                    "Flags (comma-separated): "
+                                    browser-gt-tab-manager--flag-names
+                                    nil t))
+                         :predicate #'browser-gt-tab-manager--tab-flag-p
+                         :doc "Show only tabs that are active, audible, \
+muted, pinned, incognito, or discarded.")))
+
+(add-to-list 'browser-gt-tab-manager-filter-alist
+             (cons 'by-accessed-within
+                   (list :name "Accessed within"
+                         ;; The duration is stored as typed and measured
+                         ;; from now on every refresh, so "2d" keeps
+                         ;; meaning the last two days after `g'.
+                         :reader (lambda ()
+                                   (let ((spec (string-trim
+                                                (read-string
+                                                 "Accessed within (30m, 3h, 2d, 1w): "))))
+                                     (unless (string-empty-p spec)
+                                       (browser-gt-tab-manager--duration-seconds spec)
+                                       (list spec))))
+                         :predicate
+                         (lambda (tab spec)
+                           (let ((ms (plist-get tab :lastAccessed)))
+                             (and (numberp ms)
+                                  (>= (/ ms 1000.0)
+                                      (- (float-time)
+                                         (browser-gt-tab-manager--duration-seconds
+                                          spec))))))
+                         :doc "Show only tabs accessed within a duration; \
+negate it for tabs left untouched that long.")))
+
 ;; ── Keymap and mode ────────────────────────────────────────────────────────
 
 (defvar browser-gt-tab-manager-mode-map
@@ -1738,7 +2076,8 @@ answering `n' aborts the operation."
     (define-key map (kbd "D")          #'browser-gt-tab-manager-delete-immediate)
     (define-key map (kbd "s")          #'browser-gt-tab-manager-cycle-sort)
     (define-key map (kbd "w")          #'browser-gt-tab-manager-copy-url)
-    (define-key map (kbd "/")          #'browser-gt-tab-manager-set-filter)
+    (define-key map (kbd "/")          #'browser-gt-tab-manager-filter-by)
+    (define-key map (kbd "\\")         #'browser-gt-tab-manager-filter-remove)
     (define-key map (kbd "v")          #'browser-gt-tab-manager-toggle-url)
     (define-key map (kbd "r")          #'browser-gt-tab-manager-cycle-client-column)
     (define-key map (kbd "a")          #'browser-gt-tab-manager-toggle-accessed)
@@ -1783,8 +2122,9 @@ Columns:
   Title      the tab's title as reported by the browser.
 
 The header line above the table shows the current sort key, the
-active regex filter (when any), and `URL view' (when the URL
-toggle is on).
+active filters (when any), `URL view' (when the URL toggle is
+on), and the number of tabs shown — as SHOWN/TOTAL while a filter
+hides some.
 
 The one-character prefix left of the Client column is the
 mark tag: `D' means the tab is marked for closing by `x', and
@@ -1811,12 +2151,33 @@ Acting on tabs:
 Buffer state:
   \\[revert-buffer]     refresh (re-fetch every browser's tabs)
   \\[browser-gt-tab-manager-cycle-sort]     cycle sort key (mru → title → domain → window)
-  \\[browser-gt-tab-manager-set-filter]     regex filter on title / URL / domain (empty clears)
+  \\[browser-gt-tab-manager-filter-by]     add or remove filters (see below)
+  \\[universal-argument] \\[browser-gt-tab-manager-filter-by]   add a negated filter (filter out)
+  \\[browser-gt-tab-manager-filter-remove]     remove one filter
   \\[browser-gt-tab-manager-toggle-url]     toggle the location column between hostname and full URL
   \\[browser-gt-tab-manager-cycle-client-column]     cycle Client column visibility (auto → on → off)
   \\[browser-gt-tab-manager-toggle-accessed]     toggle the Age column (relative time since last access)
   \\[browser-gt-tab-manager-copy-url]     copy the current tab's URL to the kill ring
   q     `quit-window'
+
+Filters are by-regexp (title, URL, or domain), by-title-regexp,
+by-url-regexp, by-domain, by-client, by-window, by-flag (active,
+audible, muted, pinned, incognito, discarded), and
+by-accessed-within (a duration such as 30m, 3h, 2d, 1w).  While a
+filter is active the same prompt also offers remove-filter, which
+removes one, and unfilter, which clears them all.  The values
+offered for completion are drawn from the tabs on display, so a
+second filter completes over what the first left.
+
+Selecting on more than one attribute is a matter of applying more
+than one filter.  Values within a single filter WIDEN the
+selection and separate filters NARROW it, so reading
+\"github.com,gitlab.com\" at the domain prompt and then filtering
+by client selects the tabs on either host that one browser owns.
+With a prefix argument the filter is negated, so
+\\[universal-argument] \\[browser-gt-tab-manager-filter-by] by-accessed-within 1w lists the tabs nobody
+has looked at for a week.  Filters survive \\[revert-buffer]; the header
+line lists them, as \"[domain=github.com !flag=pinned]\".
 
 Row id is (INSTANCE . TAB-ID); the same tab keeps its point
 position across refreshes even when the surrounding list has
@@ -1835,7 +2196,7 @@ See `browser-gt-tab-manager-mode' for the keymap and behaviour.
 Unlike `browser-gt-tab-jump' (the `completing-read' entry point), this
 command opens a persistent buffer you can leave open and refresh
 with `g'.  `browser-gt-default-client' is ignored — every connected
-browser is represented; use the buffer-local filter (`/') or the
+browser is represented; use the buffer-local filters (`/') or the
 consult-style narrow-by-typing to focus on a subset."
   (interactive)
   (unless (browser-gt-connected-clients)

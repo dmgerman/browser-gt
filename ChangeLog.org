@@ -8,6 +8,20 @@
   =:index -1= means the end.  The reply is the moved tab, whose
   =index= is where the browser actually put it (pinned and unpinned
   tabs do not mix).
+- The tab manager filters by any attribute, not only by regexp.
+  =/= adds a filter -- regexp on title/URL/domain, title regexp, URL
+  regexp, domain, client, window, flag (active, audible, muted,
+  pinned, incognito, discarded), or accessed-within a duration --
+  and =C-u /= adds it negated.  Filters stack: values within one
+  widen, separate filters narrow.  While a filter is active the same
+  prompt offers =remove-filter= and =unfilter= (=\= removes one
+  directly).  The header shows them and a SHOWN/TOTAL
+  count.  The registry is =browser-gt-tab-manager-filter-alist=,
+  modelled on org-roam-gt-list.  Window numbers in the Client
+  column are now computed over every tab, so they no longer shift
+  when a filter hides a window.
+  =browser-gt-tab-manager-set-filter= is gone; its behaviour is the
+  =by-regexp= filter.
 - Update to ChatGPT's rewrite of its conversation markup, which broke
   saving a conversation.  
 - Fix the handling of a large message whose text is not pure ASCII.

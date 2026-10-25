@@ -5,3 +5,4 @@ spookfox
 .claude
 .DS_Store
 ai
+*.profraw
