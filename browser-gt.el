@@ -1058,6 +1058,43 @@ behaves the same way."
          (if all (mapconcat #'identity all ", ") "none"))))
     (browser-gt-request "CLOSE_TAB" `(:id ,id) browser)))
 
+(defun browser-gt-move-tab (tab index &optional window-id)
+  "Move TAB to position INDEX, in window WINDOW-ID when given.
+TAB is a plist as returned by `browser-gt-browser-tabs' — it must
+carry both `:id' and `:browser-gt-browser'.  INDEX is the
+zero-based position in the target window; -1 means after the last
+tab.  WINDOW-ID is the browser's id of another window of the same
+browser (a tab's `:windowId'); nil keeps TAB in its own window.  A
+tab cannot move between browsers, nor between a private and a
+normal window.
+
+Signals `user-error' when TAB lacks either required key, or when
+its owning browser is not currently connected.
+
+Returns the browser-side response payload plist: the moved tab on
+success, whose `:index' and `:windowId' say where it actually
+ended up — browsers keep pinned and unpinned tabs apart, so the
+index can differ from INDEX — or `(:status \"error\" :message MSG)'
+when the browser rejected the move."
+  (let ((id      (plist-get tab :id))
+        (browser (plist-get tab :browser-gt-browser)))
+    (unless (numberp id)
+      (user-error "Browser-gt-move-tab: TAB has no numeric :id"))
+    (unless (and (stringp browser) (not (string-empty-p browser)))
+      (user-error "Browser-gt-move-tab: TAB has no :browser-gt-browser"))
+    (unless (integerp index)
+      (user-error "Browser-gt-move-tab: INDEX must be an integer"))
+    (unless (member browser (browser-gt-connected-clients))
+      (user-error
+       "Browser-gt-move-tab: browser %S is not connected (connected: %s)"
+       browser
+       (let ((all (browser-gt-connected-clients)))
+         (if all (mapconcat #'identity all ", ") "none"))))
+    (browser-gt-request "MOVE_TAB"
+                        (append `(:id ,id :index ,index)
+                                (when window-id `(:windowId ,window-id)))
+                        browser)))
+
 (defun browser-gt--broadcast (data &optional client)
   "JSON-encode DATA and send it to one connected client.
 With CLIENT nil and exactly one client connected, that client is the

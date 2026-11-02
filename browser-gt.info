@@ -411,8 +411,9 @@ built-in handler names cover the operations Emacs is most likely to
 need: ‘GET_ALL_TABS’ returns the current tab list, ‘GET_ACTIVE_TAB’
 returns the active tab of the currently focused window, ‘OPEN_TAB’
 creates a new tab at a given URL, ‘FOCUS_TAB’ switches to an existing
-tab, and ‘CLOSE_TAB’ closes one.  Each handler's payload keys and
-response shape are documented in ‘CONTRIBUTING.org’.
+tab, ‘CLOSE_TAB’ closes one, and ‘MOVE_TAB’ moves one to another
+position or window.  Each handler's payload keys and response shape are
+documented in ‘CONTRIBUTING.org’.
 
      ;; List every open tab as title/url pairs
      (mapcar (lambda (tab) (cons (plist-get tab :title) (plist-get tab :url)))
@@ -517,6 +518,26 @@ closes - so pages with unsaved form state close silently.
        (when (equal (url-host (url-generic-parse-url (or (plist-get tab :url) "")))
                     "example.com")
          (browser-gt-close-tab tab)))
+
+   *‘browser-gt-move-tab TAB INDEX &optional WINDOW-ID’* moves TAB to
+position INDEX (zero-based; -1 means after the last tab), in the window
+WINDOW-ID when given - another window of the same browser, as a tab's
+‘:windowId’.  Dispatches ‘MOVE_TAB’.  Signals ‘user-error’ on missing
+keys or a disconnected browser.  Returns the moved tab, whose ‘:index’
+and ‘:windowId’ say where it actually landed (browsers keep pinned and
+unpinned tabs apart, so the index can differ from INDEX), or ‘(:status
+"error" :message MSG)’ when the browser refused.  Note that a tab plist
+carries its own ‘:status’ (‘"complete"’, ‘"loading"’), so test for
+‘"error"’ rather than for ‘"ok"’.  A tab cannot move between browsers,
+nor between a private and a normal window.
+
+     ;; Gather every GitHub tab into the window of the first one found.
+     (let* ((tabs   (seq-filter (lambda (tab)
+                                  (string-match-p "github\\.com" (or (plist-get tab :url) "")))
+                                (browser-gt-browser-tabs '("chrome"))))
+            (target (plist-get (car tabs) :windowId)))
+       (dolist (tab (cdr tabs))
+         (browser-gt-move-tab tab -1 target)))
 
    The tab manager uses these functions internally; see *note Tab
 management:: below for how the aggregated view is presented
@@ -818,14 +839,15 @@ Opens ‘*browser-gt-tab-manager*’ in ‘browser-gt-tab-manager-mode’ (a
 ‘tabulated-list-mode’ derivative).  One line per tab, dired-style
 marking, persistent so you can keep it around and refresh with ‘g’.
 
-   The header line shows the current sort key, any active regex filter,
-whether URL view is on, and the tab count.
+   The header line shows the current sort key, the active filters,
+whether URL view is on, and the tab count (‘SHOWN/TOTAL’ while a filter
+hides some).
 
    Columns: an optional Client column, the ‘[flags]’ column, the ‘Age’
 column (relative time since last access; shown by default, toggle with
 ‘a’), the Domain column (or URL when toggled), and Title.  The
 one-character prefix left of the Client column is the mark tag - ‘D’ for
-close, ‘B’ for bookmark.
+close, ‘B’ for bookmark, ‘M’ for move.
 
    Keymap:
 
@@ -835,22 +857,53 @@ Key         Action
 ‘M-RET’     preview: focus in browser without raising the window
 ‘d’         mark tab for deletion (‘D’ tag), advance
 ‘b’         mark tab for bookmarking (‘B’ tag), advance
+‘m’         mark tab for moving (‘M’ tag), advance
 ‘u’ / ‘U’   unmark current line / unmark all
 ‘t’         toggle every mark
-‘x’         execute marks: bookmark ‘B’'s, close ‘D’'s (one confirm)
+‘x’         execute marks: bookmark ‘B’'s, move ‘M’'s, close ‘D’'s
 ‘D’         close current tab immediately, no confirmation
+‘M’         move current tab to a window of any browser, now
 ‘B’         bookmark current tab immediately, prompt for name
 ‘s’         cycle sort: ‘mru’ -> ‘title’ -> ‘domain’ -> ‘window’
 ‘v’         toggle location column between hostname and full URL
 ‘r’         cycle Client column visibility: ‘auto’ -> ‘on’ -> ‘off’
 ‘a’         toggle the Age column (relative time since last access)
 ‘w’         copy the current tab's URL to the kill ring
-‘/’         regex filter on title / URL / domain (empty clears)
+‘/’         add a filter on any tab attribute, or remove filters
+‘C-u /’     add a negated filter ("filter out")
+‘\’         remove one active filter
 ‘= d’       mark all duplicate tabs for deletion
 ‘g’         refresh from every connected browser
 ‘n’ / ‘p’   next / previous line
 ‘q’         quit-window
 ‘?’         ‘describe-mode’ (full binding list, docstring, examples)
+
+   Filters narrow the view by any tab attribute.  ‘/’ asks for the
+attribute, then for its value:
+
+Filter                 Value
+------------------------------------------------------------------------------------------
+‘by-regexp’            regexp on title, URL, or domain
+‘by-title-regexp’      regexp on the title
+‘by-url-regexp’        regexp on the full URL
+‘by-domain’            one or more hosts
+‘by-client’            one or more browsers
+‘by-window’            one or more windows, named ‘CLIENT:N’ as in the Client column
+‘by-flag’              ‘active’, ‘audible’, ‘muted’, ‘pinned’, ‘incognito’, ‘discarded’
+‘by-accessed-within’   a duration: ‘30m’, ‘3h’, ‘2d’, ‘1w’
+‘remove-filter’        removes one active filter (offered only while one is)
+‘unfilter’             clears every filter (offered only while one is active)
+
+   Each choice is annotated with what it does.  Completion of values is
+over the tabs on display, so a second filter completes over what the
+first one left.  Values within one filter widen the selection
+(‘github.com,gitlab.com’ at the domain prompt keeps both); separate
+filters narrow it.  With ‘C-u’ a filter is negated: ‘C-u /
+by-accessed-within 1w’ lists the tabs nobody has looked at for a week,
+and ‘C-u / by-flag pinned’ hides pinned tabs.  Filters survive ‘g’, and
+the header line lists them as ‘[domain=github.com !flag=pinned]’.  The
+registry is ‘browser-gt-tab-manager-filter-alist’; see its docstring to
+add your own.
 
    Dired one-mark-per-row: pressing ‘d’ on a ‘B’-marked row (or vice
 versa) replaces the tag rather than layering.
@@ -858,16 +911,68 @@ versa) replaces the tag rather than layering.
    Bookmarks are stored via ‘browser-gt-tab-manager-bookmark-function’
 (a defcustom; default writes a ‘bookmark-store’ record with a
 browser-gt-owned handler that calls ‘browse-url’ on jump).  Vanilla
-‘bookmark-set’ alone cannot make URL bookmarks - it captures the current
-buffer's location - so browser-gt provides its own tiny handler function
-and does not rely on external autoloads.  Users of bookmark+ can
-override the defcustom to plug in ‘bmkp-jump-url-browse’ for a nicer
-‘*Bookmark List*’ classification.
+‘bookmark-set’ cannot make a URL bookmark for one tab - in this buffer
+it saves the view, see below - so browser-gt provides its own tiny
+handler function and does not rely on external autoloads.  Users of
+bookmark+ can override the defcustom to plug in ‘bmkp-jump-url-browse’
+for a nicer ‘*Bookmark List*’ classification.
 
    Immediate bookmarking (‘B’) prompts for the name (default: tab title)
 and asks before overwriting an existing bookmark.  Batch bookmarking via
 ‘b’ + ‘x’ silently suffixes ‘<2>’, ‘<3>’, ... on name collisions so no
 existing bookmark is overwritten during a batch.
+
+  1. Moving tabs between windows
+
+     Moving follows the same pattern as closing and bookmarking: ‘M’
+     moves the tab on the current line now, and ‘m’ marks a tab for
+     moving (‘M’ tag) so ‘x’ moves every marked one together.  Either
+     way the destination is asked for once, among every window of every
+     connected browser, labelled like the Client column (‘chrome:1 (37
+     tabs) TITLE’, the title being that window's active tab).  The tabs
+     go after the window's last tab, in the order the buffer shows them;
+     ‘C-u M’ asks for the position instead.
+
+     ‘x’ asks every question - the window, the reopen confirmation
+     below, the close count - before it does anything, so answering no
+     leaves every tab as it was.  It then bookmarks the ‘B’'s, moves the
+     ‘M’'s, and closes the ‘D’'s.
+
+     A tab going to another window of its own browser is moved and keeps
+     its history and page state.  A browser cannot hand a tab to another
+     browser, nor move one between a private and a normal window, so
+     such a tab is _reopened_: its URL is opened in the destination, and
+     the original is closed only after that worked, so a failure loses
+     nothing.  A reopened tab starts fresh - history, form contents and
+     pinning do not travel - and since it closes tabs, it asks first
+     when ‘browser-gt-tab-manager-confirm-close’ is non-nil.
+
+     The marks of the tabs that went are cleared, so a later ‘x’ does
+     not close them at their new place; a tab that failed keeps its
+     mark.  With no other window to go to, ‘M’ and ‘x’ signal an error.
+
+  2. Bookmarking a view
+
+     ‘C-x r m’ (‘bookmark-set’) in the manager saves the _view_ rather
+     than a tab: the active filters, the sort key, and the URL, Age and
+     Client column settings.  The default name is
+     ‘browser-gt-tab-manager-view-bookmark-prefix’ (‘"Browser tabs"’)
+     followed by the filters, e.g.  ‘Browser tabs: !flag=pinned
+     !accessed-within=1d’.  Jumping to it (‘C-x r b’, or any front end
+     built on ‘bookmark.el’) opens the manager with that view over the
+     tabs open at the time - a saved "stale tabs" view keeps showing
+     whatever is stale today.
+
+     The same view can be opened without a bookmark:
+
+          (browser-gt-tab-manager-open-view
+           '((:key by-flag :values ("pinned") :negate t)
+             (:key by-accessed-within :values ("1w") :negate t))
+           'mru)
+
+     A ‘by-window’ filter names a window by the id the browser gave it,
+     which does not survive a browser restart; afterwards that filter
+     matches nothing and shows as ‘CLIENT:?’ in the header.
 
 
 File: browser-gt.info,  Node: browser-gt-tab-manager-close-duplicates,  Prev: browser-gt-tab-manager -- buffer view,  Up: Tab management
@@ -1535,38 +1640,40 @@ Node: Keyboard shortcuts13636
 Node: Per-tab eval consent14255
 Node: The popup14815
 Node: Querying and controlling the browser from Emacs15575
-Node: API Enumerating browsers and their tabs16970
-Node: Quick helpers21273
-Node: Client names and how they persist25217
-Node: Route URLs through browser-gt28090
-Node: Rewrite URLs before dispatch31580
-Node: Tab management34121
-Node: browser-gt-tab-jump -- completing-read jumper34699
-Node: browser-gt-tab-manager -- buffer view36724
-Node: browser-gt-tab-manager-close-duplicates39975
-Node: Run JavaScript in any tab from Emacs40682
-Node: browser-gt-request40996
-Node: Minimal example44876
-Node: browser-gt-js source blocks45897
-Node: Setup49284
-Node: Requirements49568
-Node: Emacs51602
-Node: yt-dlp command lines56879
-Node: Chrome extension58410
-Node: Firefox extension59289
-Node: What works the same in both extensions60322
-Node: What differs61125
-Node: Customising61736
-Node: Security62453
-Node: Sending content from the Web browser to Emacs63271
-Node: Querying and controlling tabs from Emacs64059
-Node: Evaluating JavaScript in tabs64835
-Node: Pausing the bridge without uninstalling66054
-Node: The WebSocket itself66472
-Node: Troubleshooting67546
-Node: License68878
-Node: Info manual69059
-Node: Adding a new action or modifying the protocol70094
+Node: API Enumerating browsers and their tabs17026
+Node: Quick helpers22547
+Node: Client names and how they persist26491
+Node: Route URLs through browser-gt29364
+Node: Rewrite URLs before dispatch32854
+Node: Tab management35395
+Node: browser-gt-tab-jump -- completing-read jumper35973
+Node: browser-gt-tab-manager -- buffer view37998
+Ref: Moving tabs between windows43125
+Ref: Bookmarking a view44774
+Node: browser-gt-tab-manager-close-duplicates45840
+Node: Run JavaScript in any tab from Emacs46547
+Node: browser-gt-request46861
+Node: Minimal example50741
+Node: browser-gt-js source blocks51762
+Node: Setup55149
+Node: Requirements55433
+Node: Emacs57467
+Node: yt-dlp command lines62744
+Node: Chrome extension64275
+Node: Firefox extension65154
+Node: What works the same in both extensions66187
+Node: What differs66990
+Node: Customising67601
+Node: Security68318
+Node: Sending content from the Web browser to Emacs69136
+Node: Querying and controlling tabs from Emacs69924
+Node: Evaluating JavaScript in tabs70700
+Node: Pausing the bridge without uninstalling71919
+Node: The WebSocket itself72337
+Node: Troubleshooting73411
+Node: License74743
+Node: Info manual74924
+Node: Adding a new action or modifying the protocol75959
 
 End Tag Table
 

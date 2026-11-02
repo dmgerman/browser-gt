@@ -226,6 +226,7 @@ org-capture templates: =(browser-gt-get-url)=,
 | =OPEN_INCOGNITO_TAB= | =:url=                           | created Tab (reuses an existing incognito window or creates one) |
 | =FOCUS_TAB=          | =:id=, optional =:focusWindow=     | ={:status "ok"}=                        |
 | =CLOSE_TAB=          | =:id=                            | =null=                                  |
+| =MOVE_TAB=           | =:id=, =:index= (-1 = end), optional =:windowId= | the moved =Tab= (its =:index= / =:windowId= are where it landed) |
 | =EVAL_IN_ACTIVE_TAB= | =:code=, optional =:world=, =:tabId= | =:result= = array of =InjectionResult=    |
 
 =InjectionResult= is =(:documentId "..." :frameId 0 :result <value>)=.

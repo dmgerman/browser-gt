@@ -1048,12 +1048,12 @@ Cycled by `r' in the manager buffer.")
 
 Keys are the row-ids used by `tabulated-list-get-id' (each key
 is a cons of the browser's instance UUID and the tab id).
-Values are `delete' for `D'-tagged rows and
-`bookmark' for `B'-tagged rows.  The hash is the single source of
-truth for mark state; `tabulated-list-put-tag' writes to the
-buffer padding only for visual feedback, and every `--refresh'
-call reapplies from this hash after `tabulated-list-print' wipes
-the padding.
+Values are `delete' for `D'-tagged rows, `bookmark' for
+`B'-tagged rows, and `move' for `M'-tagged rows.  The hash is the
+single source of truth for mark state; `tabulated-list-put-tag'
+writes to the buffer padding only for visual feedback, and every
+`--refresh' call reapplies from this hash after
+`tabulated-list-print' wipes the padding.
 
 Initialised by `browser-gt-tab-manager-mode' since
 `define-derived-mode' calls `kill-all-local-variables' which
@@ -1379,7 +1379,7 @@ toggle)."
 
 (defun browser-gt-tab-manager--tag-char (tag)
   "Return the one-character string used to display TAG in the padding."
-  (pcase tag ('delete "D") ('bookmark "B") (_ " ")))
+  (pcase tag ('delete "D") ('bookmark "B") ('move "M") (_ " ")))
 
 (defun browser-gt-tab-manager--set-mark-at-point (tag)
   "Set the mark on the current line to TAG (or nil to clear), advance.
@@ -1403,6 +1403,14 @@ Executed by `x' using the tab's title as the bookmark name; use
 this row is overwritten (dired: one mark per row)."
   (interactive "p")
   (browser-gt-tab-manager--set-mark-at-point 'bookmark))
+
+(defun browser-gt-tab-manager-mark-move (&optional _arg)
+  "Mark the tab on the current line for moving and advance one line.
+Executed by `x', which asks once for the window every `M'-marked
+tab goes to; use `M' to move the current tab immediately.  A prior
+mark on this row is overwritten (dired: one mark per row)."
+  (interactive "p")
+  (browser-gt-tab-manager--set-mark-at-point 'move))
 
 (defun browser-gt-tab-manager-unmark (&optional _arg)
   "Clear the mark on the tab on the current line and advance one line."
@@ -1490,12 +1498,16 @@ still return an empty payload on success."
       "unknown reason"))
 
 (defun browser-gt-tab-manager-execute ()
-  "Execute every mark: bookmark `B'-marked tabs, close `D'-marked tabs.
-Bookmarks fire first so a bookmark-then-close pair still records
-the URL before it becomes unreachable.  Bookmark names are the
-tab's title; collisions get a `<N>' suffix so no existing bookmark
-is silently overwritten.  Honours `browser-gt-tab-manager-confirm-close'
-for the count prompt when any `D' marks are present.
+  "Execute every mark: bookmark `B's, move `M's, close `D's.
+When any tab is `M'-marked, first asks for the one window all of
+them go to (see `browser-gt-tab-manager-move-to-window' for how a
+move into another browser is done).  Then bookmarks fire, then
+moves, then closes: a bookmark-then-close pair still records the
+URL before it becomes unreachable.  Bookmark names are the tab's
+title; collisions get a `<N>' suffix so no existing bookmark is
+silently overwritten.  Honours `browser-gt-tab-manager-confirm-close'
+for the count prompt when any `D' marks are present, and for the
+reopen prompt when a moved tab has to be reopened.
 
 A close request whose target tab was already gone (closed
 externally between the last refresh and now) is reported as a
@@ -1503,55 +1515,75 @@ externally between the last refresh and now) is reported as a
 disappear on the follow-up refresh."
   (interactive)
   (let* ((marked    (browser-gt-tab-manager--marked-actions))
-         (deletes   (seq-filter (lambda (m) (eq (cdr m) 'delete))   marked))
-         (bookmarks (seq-filter (lambda (m) (eq (cdr m) 'bookmark)) marked))
+         (tabs-of   (lambda (tag)
+                      (delq nil
+                            (mapcar (lambda (m)
+                                      (and (eq (cdr m) tag)
+                                           (cdr (assoc (car m)
+                                                       browser-gt-tab-manager--tabs))))
+                                    marked))))
+         (deletes   (funcall tabs-of 'delete))
+         (bookmarks (funcall tabs-of 'bookmark))
+         (moves     (funcall tabs-of 'move))
          (nd (length deletes))
-         (nb (length bookmarks)))
-    (cond
-     ((zerop (+ nd nb))
-      (message "No tabs marked"))
-     ((and (> nd 0)
-           browser-gt-tab-manager-confirm-close
-           (not (yes-or-no-p
-                 (if (> nb 0)
-                     (format "Execute: bookmark %d, close %d? " nb nd)
-                   (format "Close %d marked tab%s? "
-                           nd (if (= nd 1) "" "s"))))))
-      (message "Browser-gt-tab-manager: cancelled"))
-     (t
-      (let ((booked 0) (closed 0) (gone 0))
-        (dolist (m bookmarks)
-          (let ((tab (cdr (assoc (car m) browser-gt-tab-manager--tabs))))
-            (when tab
-              (condition-case err
-                  (let* ((raw  (or (plist-get tab :title) "(untitled)"))
-                         (name (browser-gt-tab-manager--unique-bookmark-name raw)))
-                    (funcall browser-gt-tab-manager-bookmark-function name tab)
-                    (setq booked (1+ booked)))
-                (error
-                 (message "Bookmark failed for %s: %s"
-                          (plist-get tab :title)
-                          (error-message-string err)))))))
-        (dolist (m deletes)
-          (let ((tab (cdr (assoc (car m) browser-gt-tab-manager--tabs))))
-            (when tab
-              (condition-case err
-                  (let ((response (browser-gt-close-tab tab)))
-                    (if (browser-gt-tab-manager--response-ok-p response)
-                        (setq closed (1+ closed))
-                      (setq gone (1+ gone))))
-                (error
-                 (message "Could not close %s: %s"
-                          (plist-get tab :title)
-                          (error-message-string err)))))))
-        (message
-         (if (zerop gone)
-             (format "Browser-gt-tab-manager: bookmarked %d/%d, closed %d/%d"
-                     booked nb closed nd)
-           (format "Browser-gt-tab-manager: bookmarked %d/%d, closed %d/%d \
-(%d already gone)"
-                   booked nb closed nd gone)))
-        (browser-gt-tab-manager--refresh))))))
+         (nb (length bookmarks))
+         (nm (length moves)))
+    (if (zerop (+ nd nb nm))
+        (message "No tabs marked")
+      ;; Every question is asked before anything is done, so answering
+      ;; no to the last one leaves every tab as it was.
+      (let ((window (and moves
+                         (browser-gt-tab-manager--read-destination moves))))
+        (when window
+          (browser-gt-tab-manager--confirm-reopen moves window))
+        (when (and (> nd 0)
+                   browser-gt-tab-manager-confirm-close
+                   (not (yes-or-no-p
+                         (if (> (+ nb nm) 0)
+                             (format "Execute: bookmark %d, move %d, close %d? "
+                                     nb nm nd)
+                           (format "Close %d marked tab%s? "
+                                   nd (if (= nd 1) "" "s"))))))
+          (user-error "Browser-gt-tab-manager: cancelled"))
+        (let ((booked 0) (closed 0) (gone 0) (counts nil))
+          (dolist (tab bookmarks)
+            (condition-case err
+                (let* ((raw  (or (plist-get tab :title) "(untitled)"))
+                       (name (browser-gt-tab-manager--unique-bookmark-name raw)))
+                  (funcall browser-gt-tab-manager-bookmark-function name tab)
+                  (setq booked (1+ booked)))
+              (error
+               (message "Bookmark failed for %s: %s"
+                        (plist-get tab :title)
+                        (error-message-string err)))))
+          (when window
+            (setq counts (browser-gt-tab-manager--move-tabs moves window -1)))
+          (dolist (tab deletes)
+            (condition-case err
+                (let ((response (browser-gt-close-tab tab)))
+                  (if (browser-gt-tab-manager--response-ok-p response)
+                      (setq closed (1+ closed))
+                    (setq gone (1+ gone))))
+              (error
+               (message "Could not close %s: %s"
+                        (plist-get tab :title)
+                        (error-message-string err)))))
+          (browser-gt-tab-manager--refresh)
+          (message "Browser-gt-tab-manager: %s"
+                   (mapconcat
+                    #'identity
+                    (delq nil
+                          (list (and (> nb 0)
+                                     (format "bookmarked %d/%d" booked nb))
+                                (and counts
+                                     (browser-gt-tab-manager--move-summary
+                                      counts window))
+                                (and (> nd 0)
+                                     (if (zerop gone)
+                                         (format "closed %d/%d" closed nd)
+                                       (format "closed %d/%d (%d already gone)"
+                                               closed nd gone)))))
+                    ", ")))))))
 
 (defun browser-gt-tab-manager-delete-immediate ()
   "Close the tab on the current line immediately, no mark, no confirmation.
@@ -1576,6 +1608,207 @@ refreshes the buffer so the stale row disappears — no error."
          (message "Could not close %s: %s"
                   (plist-get tab :title)
                   (error-message-string err))))))))
+
+(defun browser-gt-tab-manager--window-choices (tabs)
+  "Return an alist of (LABEL . WINDOW) for the windows TABS can go to.
+WINDOW is a plist (:browser NAME :id WINDOWID :incognito BOOL).
+Every window of every connected browser is offered, fetched
+afresh so windows a filter hides — or opened since the last
+refresh — are included.  When all of TABS share one window, that
+window is left out.  LABEL reads `CLIENT:N  (K tabs)  TITLE', N
+numbered as in the Client column, TITLE that window's active tab,
+and `private' added for a private window."
+  (let* ((all     (browser-gt-browser-tabs))
+         (numbers (browser-gt-tab-manager--compute-window-numbers all))
+         (sources (delete-dups
+                   (mapcar (lambda (tab)
+                             (cons (plist-get tab :browser-gt-browser)
+                                   (plist-get tab :windowId)))
+                           tabs)))
+         (windows (seq-remove
+                   (lambda (w) (and (= (length sources) 1)
+                                    (equal w (car sources))))
+                   (sort (delete-dups
+                          (mapcar (lambda (tab)
+                                    (cons (plist-get tab :browser-gt-browser)
+                                          (plist-get tab :windowId)))
+                                  all))
+                         (lambda (a b)
+                           (or (string< (car a) (car b))
+                               (and (equal (car a) (car b))
+                                    (< (cdr a) (cdr b)))))))))
+    (mapcar
+     (lambda (w)
+       (let* ((members (seq-filter
+                        (lambda (tab)
+                          (equal w (cons (plist-get tab :browser-gt-browser)
+                                         (plist-get tab :windowId))))
+                        all))
+              (active  (seq-find (lambda (tab) (plist-get tab :active))
+                                 members))
+              (private (seq-some (lambda (tab) (plist-get tab :incognito))
+                                 members)))
+         (cons (format "%s:%s  (%d tab%s%s)  %s"
+                       (car w)
+                       (or (cdr (assoc w numbers)) "?")
+                       (length members)
+                       (if (= (length members) 1) "" "s")
+                       (if private ", private" "")
+                       (or (and active (plist-get active :title)) ""))
+               (list :browser (car w) :id (cdr w)
+                     :incognito (and private t)))))
+     windows)))
+
+(defun browser-gt-tab-manager--movable-in-place-p (tab window)
+  "Return non-nil when TAB can be moved into WINDOW with `MOVE_TAB'.
+That needs the same browser and the same privacy: a browser moves
+tabs only between its own windows, and never between a private
+and a normal one.  Any other destination means reopening TAB."
+  (and (equal (plist-get tab :browser-gt-browser) (plist-get window :browser))
+       (eq (and (plist-get tab :incognito) t) (plist-get window :incognito))))
+
+(defun browser-gt-tab-manager--relocate-tab (tab window index)
+  "Put TAB in WINDOW at INDEX; return `moved', `reopened', or `skipped'.
+WINDOW is a plist from `browser-gt-tab-manager--window-choices'.
+When `--movable-in-place-p' allows it TAB is moved, which keeps
+its history and page state.  Otherwise TAB's URL is opened in
+WINDOW and, only once that succeeded, TAB is closed — so a failed
+open leaves the original where it was.  A reopened tab starts
+fresh: history, form contents and pinning do not travel.  A tab
+already in WINDOW is `skipped' unless INDEX asks to reposition it.
+Signals an error carrying the browser's message on failure."
+  (let ((browser (plist-get window :browser))
+        (wid     (plist-get window :id)))
+    (cond
+     ((and (equal browser (plist-get tab :browser-gt-browser))
+           (equal wid (plist-get tab :windowId))
+           (= index -1))
+      'skipped)
+     ((browser-gt-tab-manager--movable-in-place-p tab window)
+      (let ((response (browser-gt-move-tab tab index wid)))
+        ;; A moved tab comes back as the tab plist, whose own `:status'
+        ;; is "complete" or "loading", so only "error" means failure.
+        (when (equal (plist-get response :status) "error")
+          (error "%s" (browser-gt-tab-manager--response-message response)))
+        'moved))
+     (t
+      (let* ((url (plist-get tab :url))
+             (opened
+              (progn
+                (unless (and (stringp url) (not (string-empty-p url)))
+                  (error "Tab has no URL to reopen"))
+                (browser-gt-request "OPEN_TAB"
+                                    (append `(:url ,url :windowId ,wid
+                                              :active :json-false)
+                                            (unless (= index -1)
+                                              `(:index ,index)))
+                                    browser))))
+        (when (equal (plist-get opened :status) "error")
+          (error "Opening in %s failed: %s" browser
+                 (browser-gt-tab-manager--response-message opened)))
+        (browser-gt-close-tab tab)
+        'reopened)))))
+
+(defun browser-gt-tab-manager--read-destination (tabs)
+  "Ask which window TABS go to; return its plist from `--window-choices'.
+Signals a `user-error' when there is no window to offer."
+  (let ((choices (or (browser-gt-tab-manager--window-choices tabs)
+                     (user-error "No other browser window to move %s to"
+                                 (if (cdr tabs) "these tabs" "this tab")))))
+    (cdr (assoc (completing-read
+                 (if (cdr tabs)
+                     (format "Move %d tabs to window: " (length tabs))
+                   (format "Move %s to window: "
+                           (truncate-string-to-width
+                            (or (plist-get (car tabs) :title) "tab")
+                            40 nil nil "…")))
+                 choices nil t)
+                choices))))
+
+(defun browser-gt-tab-manager--confirm-reopen (tabs window)
+  "Ask before reopening those of TABS that cannot be moved into WINDOW.
+Reopening closes the original, so this asks when
+`browser-gt-tab-manager-confirm-close' is non-nil and signals a
+`user-error' when the answer is no.  Asks nothing when every tab
+can be moved in place."
+  (let ((reopen (seq-count
+                 (lambda (tab)
+                   (not (browser-gt-tab-manager--movable-in-place-p tab window)))
+                 tabs)))
+    (when (and (> reopen 0)
+               browser-gt-tab-manager-confirm-close
+               (not (yes-or-no-p
+                     (format "%d tab%s cannot be moved to %s; reopen there \
+and close the original%s? "
+                             reopen (if (= reopen 1) "" "s")
+                             (plist-get window :browser)
+                             (if (= reopen 1) "" "s")))))
+      (user-error "Cancelled"))))
+
+(defun browser-gt-tab-manager--move-tabs (tabs window start)
+  "Put TABS, in order, in WINDOW from position START; return the counts.
+START is the position of the first tab, the rest following it, or
+-1 to put them all after the window's last tab.  The returned
+alist maps `moved', `reopened', `skipped' and `failed' to counts.
+A tab that went has its mark cleared; a failure is reported and
+keeps its mark.  Does not refresh the buffer."
+  (let ((counts (list (cons 'moved 0) (cons 'reopened 0)
+                      (cons 'skipped 0) (cons 'failed 0)))
+        (hash   (browser-gt-tab-manager--marks-hash)))
+    (seq-do-indexed
+     (lambda (tab k)
+       (condition-case err
+           (let ((outcome (browser-gt-tab-manager--relocate-tab
+                           tab window (if (= start -1) -1 (+ start k)))))
+             (cl-incf (alist-get outcome counts))
+             (remhash (browser-gt-tab-manager--row-id tab) hash))
+         (error
+          (cl-incf (alist-get 'failed counts))
+          (message "Could not move %s: %s"
+                   (plist-get tab :title) (error-message-string err))
+          (sit-for 1))))
+     tabs)
+    counts))
+
+(defun browser-gt-tab-manager--move-summary (counts window)
+  "Return a short report of COUNTS from a move into WINDOW."
+  (format "moved %d, reopened %d to %s%s%s"
+          (alist-get 'moved counts)
+          (alist-get 'reopened counts)
+          (browser-gt-tab-manager--window-label
+           (cons (plist-get window :browser) (plist-get window :id)))
+          (if (zerop (alist-get 'skipped counts)) ""
+            (format ", %d already there" (alist-get 'skipped counts)))
+          (if (zerop (alist-get 'failed counts)) ""
+            (format ", %d FAILED" (alist-get 'failed counts)))))
+
+(defun browser-gt-tab-manager-move-to-window (&optional ask-position)
+  "Move the tab on the current line to a window, now.
+Prompts for the destination among every window of every connected
+browser and puts the tab after that window's last tab.  With a
+prefix argument, ASK-POSITION non-nil, also prompts for the
+zero-based position.  To move several tabs at once, mark them with
+\\<browser-gt-tab-manager-mode-map>\\[browser-gt-tab-manager-mark-move] and execute with \\[browser-gt-tab-manager-execute].
+
+A tab going to another window of its own browser is moved and
+keeps its state.  One going to a different browser — or between a
+private and a normal window — cannot be moved, so it is reopened:
+its URL is opened in the destination and the original closed once
+that worked.  History, form contents and pinning do not survive
+reopening, and as it closes the tab it asks first when
+`browser-gt-tab-manager-confirm-close' is non-nil."
+  (interactive "P")
+  (let* ((tab    (or (browser-gt-tab-manager--tab-at-point)
+                     (user-error "No tab on this line")))
+         (window (browser-gt-tab-manager--read-destination (list tab)))
+         (start  (if ask-position
+                     (read-number "Position (0 = first, -1 = last): " -1)
+                   -1)))
+    (browser-gt-tab-manager--confirm-reopen (list tab) window)
+    (let ((counts (browser-gt-tab-manager--move-tabs (list tab) window start)))
+      (browser-gt-tab-manager--refresh)
+      (message "Browser-gt-tab-manager: %s"
+               (browser-gt-tab-manager--move-summary counts window)))))
 
 (defun browser-gt-tab-manager-visit-tab ()
   "Focus the tab on the current line, raising its browser window.
@@ -1676,7 +1909,7 @@ The header line shows `Client:on' or `Client:off' while overridden."
       (message "No URL on this line"))))
 
 (defun browser-gt-tab-manager--filter-choices ()
-  "Return the choices `browser-gt-tab-manager-filter-by' offers.
+  "Return the choices to offer in `browser-gt-tab-manager-filter-by'.
 Every entry of `browser-gt-tab-manager-filter-alist', preceded —
 while any filter is active — by the two ways of removing them, so
 `/' is the one place to go to change what is shown."
@@ -1941,8 +2174,10 @@ browsers.  The buffer is not displayed."
 
 (defun browser-gt-tab-manager--view-buffer (filters sort show-url show-accessed
                                                     client-column)
-  "Return the manager buffer showing the view FILTERS, SORT, and the toggles.
-See `browser-gt-tab-manager-open-view' for the arguments.  A SORT
+  "Return the manager buffer showing FILTERS, sorted by SORT.
+SHOW-URL, SHOW-ACCESSED and CLIENT-COLUMN set the URL, Age and
+Client columns; see `browser-gt-tab-manager-open-view' for what
+each argument takes.  A SORT
 or CLIENT-COLUMN value this version does not know falls back to
 the default rather than failing, so an old bookmark still opens."
   (browser-gt-tab-manager--open-buffer
@@ -2181,12 +2416,14 @@ negate it for tabs left untouched that long.")))
     (define-key map (kbd "M-<return>") #'browser-gt-tab-manager-preview-tab)
     (define-key map (kbd "d")          #'browser-gt-tab-manager-mark-delete)
     (define-key map (kbd "b")          #'browser-gt-tab-manager-mark-bookmark)
+    (define-key map (kbd "m")          #'browser-gt-tab-manager-mark-move)
     (define-key map (kbd "B")          #'browser-gt-tab-manager-bookmark-immediate)
     (define-key map (kbd "u")          #'browser-gt-tab-manager-unmark)
     (define-key map (kbd "U")          #'browser-gt-tab-manager-unmark-all)
     (define-key map (kbd "t")          #'browser-gt-tab-manager-toggle-all-marks)
     (define-key map (kbd "x")          #'browser-gt-tab-manager-execute)
     (define-key map (kbd "D")          #'browser-gt-tab-manager-delete-immediate)
+    (define-key map (kbd "M")          #'browser-gt-tab-manager-move-to-window)
     (define-key map (kbd "s")          #'browser-gt-tab-manager-cycle-sort)
     (define-key map (kbd "w")          #'browser-gt-tab-manager-copy-url)
     (define-key map (kbd "/")          #'browser-gt-tab-manager-filter-by)
@@ -2240,23 +2477,27 @@ on), and the number of tabs shown — as SHOWN/TOTAL while a filter
 hides some.
 
 The one-character prefix left of the Client column is the
-mark tag: `D' means the tab is marked for closing by `x', and
-`B' means the tab is marked for bookmarking by `x' (using the
-tab's title as the bookmark name).  One mark per row — pressing
-`d' on a `B'-marked row replaces the tag, dired-style.
+mark tag: `D' means the tab is marked for closing by `x', `B'
+that it is marked for bookmarking by `x' (using the tab's title as
+the bookmark name), and `M' that it is marked for moving by `x',
+which asks once for the window they all go to.  One mark per
+row — pressing `d' on a `B'-marked row replaces the tag,
+dired-style.
 
 \\<browser-gt-tab-manager-mode-map>
 Marking (dired-style — one mark per row):
   \\[browser-gt-tab-manager-mark-delete]     mark the current tab for deletion   (`D' tag)
   \\[browser-gt-tab-manager-mark-bookmark]     mark the current tab for bookmarking (`B' tag)
+  \\[browser-gt-tab-manager-mark-move]     mark the current tab for moving      (`M' tag)
   \\[browser-gt-tab-manager-unmark]     clear the mark on the current tab
   \\[browser-gt-tab-manager-unmark-all]     clear every mark
   \\[browser-gt-tab-manager-toggle-all-marks]     toggle every mark (delete-marks only)
   \\[browser-gt-tab-manager-mark-duplicates]   mark duplicate tabs for deletion
 
 Acting on tabs:
-  \\[browser-gt-tab-manager-execute]     execute marks: bookmark `B's, close `D's (single confirm for closes)
+  \\[browser-gt-tab-manager-execute]     execute marks: bookmark `B's, move `M's, close `D's
   \\[browser-gt-tab-manager-delete-immediate]     close the current tab immediately, no confirmation
+  \\[browser-gt-tab-manager-move-to-window]     move the current tab to a window of any browser, now
   \\[browser-gt-tab-manager-bookmark-immediate]     bookmark the current tab immediately, prompting for the name
   \\[browser-gt-tab-manager-visit-tab]   focus the current tab and raise its browser window; stay in manager
   \\[browser-gt-tab-manager-preview-tab]   preview the current tab in its browser without raising the window

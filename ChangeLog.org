@@ -26,6 +26,15 @@
   key, and the URL/Age/Client column settings -- and jumping to the
   bookmark reopens the manager with it over the tabs open then.
   =browser-gt-tab-manager-open-view= opens such a view directly.
+- =browser-gt-move-tab= moves a tab to a position or another window
+  (=MOVE_TAB=).  In the tab manager =M= moves the tab at point to a
+  window of any connected browser, and =m= marks tabs for moving
+  (=M= tag) so =x= moves them together after asking once for the
+  window; =C-u M= also asks for the position.  Between windows of one
+  browser the tab is moved; to another browser, or between private
+  and normal windows, it is reopened there and the original closed
+  once that succeeded (after a confirmation).  Moved tabs lose
+  their marks.
 - Update to ChatGPT's rewrite of its conversation markup, which broke
   saving a conversation.  
 - Fix the handling of a large message whose text is not pure ASCII.

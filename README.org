@@ -278,7 +278,8 @@ exposes.  The built-in handler names cover the operations Emacs is
 most likely to need: =GET_ALL_TABS= returns the current tab list,
 =GET_ACTIVE_TAB= returns the active tab of the currently focused
 window, =OPEN_TAB= creates a new tab at a given URL, =FOCUS_TAB=
-switches to an existing tab, and =CLOSE_TAB= closes one.  Each
+switches to an existing tab, =CLOSE_TAB= closes one, and
+=MOVE_TAB= moves one to another position or window.  Each
 handler's payload keys and response shape are documented in
 =CONTRIBUTING.org=.
 
@@ -386,6 +387,29 @@ silently.
   (when (equal (url-host (url-generic-parse-url (or (plist-get tab :url) "")))
                "example.com")
     (browser-gt-close-tab tab)))
+#+end_src
+
+*=browser-gt-move-tab TAB INDEX &optional WINDOW-ID=* moves TAB to
+position INDEX (zero-based; -1 means after the last tab), in the
+window WINDOW-ID when given -- another window of the same browser,
+as a tab's =:windowId=.  Dispatches =MOVE_TAB=.  Signals
+=user-error= on missing keys or a disconnected browser.  Returns
+the moved tab, whose =:index= and =:windowId= say where it
+actually landed (browsers keep pinned and unpinned tabs apart, so
+the index can differ from INDEX), or =(:status "error" :message
+MSG)= when the browser refused.  Note that a tab plist carries its
+own =:status= (="complete"=, ="loading"=), so test for ="error"=
+rather than for ="ok"=.  A tab cannot move between browsers, nor
+between a private and a normal window.
+
+#+begin_src emacs-lisp
+;; Gather every GitHub tab into the window of the first one found.
+(let* ((tabs   (seq-filter (lambda (tab)
+                             (string-match-p "github\\.com" (or (plist-get tab :url) "")))
+                           (browser-gt-browser-tabs '("chrome"))))
+       (target (plist-get (car tabs) :windowId)))
+  (dolist (tab (cdr tabs))
+    (browser-gt-move-tab tab -1 target)))
 #+end_src
 
 The tab manager uses these functions internally; see
@@ -675,7 +699,7 @@ Columns: an optional Client column, the =[flags]= column, the
 =Age= column (relative time since last access; shown by default,
 toggle with =a=), the Domain column (or URL when toggled), and
 Title.  The one-character prefix left of the Client column is
-the mark tag -- =D= for close, =B= for bookmark.
+the mark tag -- =D= for close, =B= for bookmark, =M= for move.
 
 Keymap:
 
@@ -685,10 +709,12 @@ Keymap:
 | =M-RET=      | preview: focus in browser without raising the window      |
 | =d=          | mark tab for deletion (=D= tag), advance                  |
 | =b=          | mark tab for bookmarking (=B= tag), advance               |
+| =m=          | mark tab for moving (=M= tag), advance                    |
 | =u= / =U=    | unmark current line / unmark all                          |
 | =t=          | toggle every mark                                         |
-| =x=          | execute marks: bookmark =B='s, close =D='s (one confirm)  |
+| =x=          | execute marks: bookmark =B='s, move =M='s, close =D='s     |
 | =D=          | close current tab immediately, no confirmation            |
+| =M=          | move current tab to a window of any browser, now          |
 | =B=          | bookmark current tab immediately, prompt for name         |
 | =s=          | cycle sort: =mru= -> =title= -> =domain= -> =window=         |
 | =v=          | toggle location column between hostname and full URL      |
@@ -749,6 +775,36 @@ title) and asks before overwriting an existing bookmark.  Batch
 bookmarking via =b= + =x= silently suffixes =<2>=, =<3>=, ... on
 name collisions so no existing bookmark is overwritten during a
 batch.
+
+**** Moving tabs between windows
+
+Moving follows the same pattern as closing and bookmarking: =M=
+moves the tab on the current line now, and =m= marks a tab for
+moving (=M= tag) so =x= moves every marked one together.  Either
+way the destination is asked for once, among every window of
+every connected browser, labelled like the Client column
+(=chrome:1  (37 tabs)  TITLE=, the title being that window's active
+tab).  The tabs go after the window's last tab, in the order the
+buffer shows them; =C-u M= asks for the position instead.
+
+=x= asks every question -- the window, the reopen confirmation
+below, the close count -- before it does anything, so answering no
+leaves every tab as it was.  It then bookmarks the =B='s, moves the
+=M='s, and closes the =D='s.
+
+A tab going to another window of its own browser is moved and
+keeps its history and page state.  A browser cannot hand a tab to
+another browser, nor move one between a private and a normal
+window, so such a tab is /reopened/: its URL is opened in the
+destination, and the original is closed only after that worked, so
+a failure loses nothing.  A reopened tab starts fresh -- history,
+form contents and pinning do not travel -- and since it closes
+tabs, it asks first when =browser-gt-tab-manager-confirm-close= is
+non-nil.
+
+The marks of the tabs that went are cleared, so a later =x= does
+not close them at their new place; a tab that failed keeps its
+mark.  With no other window to go to, =M= and =x= signal an error.
 
 **** Bookmarking a view
 
