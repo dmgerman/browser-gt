@@ -12,7 +12,10 @@ File: browser-gt.info,  Node: Top,  Next: Quick setup,  Up: (dir)
 browser-gt
 **********
 
-‘browser-gt’ is a module that allows Emacs and a Web browser to
+file:https://melpa.org/packages/browser-gt-badge.svg
+(https://melpa.org/#/browser-gt)
+
+   ‘browser-gt’ is a module that allows Emacs and a Web browser to
 communicate with each other, in both directions.
 
    • Features:
@@ -57,7 +60,7 @@ auto-reconnects, so restarting Emacs is non-disruptive.  Setup for each
 side is below.
 
    Security has been a major concern in the design of this module.
-Please see *note Security:: below for more information.
+Please see *note Security: Security. below for more information.
 
    ‘browser-gt’ was inspired by spookfox
 (https://github.com/bitspook/spookfox), a similar Emacs/Firefox
@@ -278,9 +281,9 @@ File: browser-gt.info,  Node: In Emacs,  Next: Extensibility,  Prev: In the Web 
      active tab and return the value into the org buffer.
    • An elisp API to query and control the browser: list tabs, focus,
      open, close, evaluate JS with a return value.  See the section
-     *note Querying and controlling the browser from Emacs:: below and
-     the source of ‘browser-gt-tab-manager’ for realistic usage
-     examples.
+     *note Querying and controlling the browser from Emacs: Querying and
+     controlling the browser from Emacs. below and the source of
+     ‘browser-gt-tab-manager’ for realistic usage examples.
 
 
 File: browser-gt.info,  Node: Extensibility,  Prev: In Emacs,  Up: Features
@@ -540,8 +543,8 @@ nor between a private and a normal window.
          (browser-gt-move-tab tab -1 target)))
 
    The tab manager uses these functions internally; see *note Tab
-management:: below for how the aggregated view is presented
-interactively.
+management: Tab management. below for how the aggregated view is
+presented interactively.
 
 
 File: browser-gt.info,  Node: Quick helpers,  Next: Client names and how they persist,  Prev: API Enumerating browsers and their tabs,  Up: Querying and controlling the browser from Emacs
@@ -1215,7 +1218,7 @@ File: browser-gt.info,  Node: Requirements,  Next: Emacs,  Up: Setup
 9.1 Requirements
 ================
 
-   • Emacs 27.1 or newer.
+   • Emacs 30.1 or newer.
    • ‘websocket’ package 1.13 or newer.
    • Org-mode 9.8 or newer (‘browser-gt-youtube’'s inline-image refresh
      calls ‘org-link-preview-region’, which replaced the obsoleted
@@ -1629,51 +1632,51 @@ YouTube PoToken gating, etc.)  see ‘ai/gotchas.md’.
 
 Tag Table:
 Node: Top247
-Node: Quick setup4272
-Node: Features6424
-Node: In the Web browser6616
-Node: In Emacs7546
-Node: Extensibility10190
-Node: Right-click menu actions10479
-Node: Saving a ChatGPT conversation12026
-Node: Keyboard shortcuts13636
-Node: Per-tab eval consent14255
-Node: The popup14815
-Node: Querying and controlling the browser from Emacs15575
-Node: API Enumerating browsers and their tabs17026
-Node: Quick helpers22547
-Node: Client names and how they persist26491
-Node: Route URLs through browser-gt29364
-Node: Rewrite URLs before dispatch32854
-Node: Tab management35395
-Node: browser-gt-tab-jump -- completing-read jumper35973
-Node: browser-gt-tab-manager -- buffer view37998
-Ref: Moving tabs between windows43125
-Ref: Bookmarking a view44774
-Node: browser-gt-tab-manager-close-duplicates45840
-Node: Run JavaScript in any tab from Emacs46547
-Node: browser-gt-request46861
-Node: Minimal example50741
-Node: browser-gt-js source blocks51762
-Node: Setup55149
-Node: Requirements55433
-Node: Emacs57467
-Node: yt-dlp command lines62744
-Node: Chrome extension64275
-Node: Firefox extension65154
-Node: What works the same in both extensions66187
-Node: What differs66990
-Node: Customising67601
-Node: Security68318
-Node: Sending content from the Web browser to Emacs69136
-Node: Querying and controlling tabs from Emacs69924
-Node: Evaluating JavaScript in tabs70700
-Node: Pausing the bridge without uninstalling71919
-Node: The WebSocket itself72337
-Node: Troubleshooting73411
-Node: License74743
-Node: Info manual74924
-Node: Adding a new action or modifying the protocol75959
+Node: Quick setup4371
+Node: Features6523
+Node: In the Web browser6715
+Node: In Emacs7645
+Node: Extensibility10337
+Node: Right-click menu actions10626
+Node: Saving a ChatGPT conversation12173
+Node: Keyboard shortcuts13783
+Node: Per-tab eval consent14402
+Node: The popup14962
+Node: Querying and controlling the browser from Emacs15722
+Node: API Enumerating browsers and their tabs17173
+Node: Quick helpers22709
+Node: Client names and how they persist26653
+Node: Route URLs through browser-gt29526
+Node: Rewrite URLs before dispatch33016
+Node: Tab management35557
+Node: browser-gt-tab-jump -- completing-read jumper36135
+Node: browser-gt-tab-manager -- buffer view38160
+Ref: Moving tabs between windows43287
+Ref: Bookmarking a view44936
+Node: browser-gt-tab-manager-close-duplicates46002
+Node: Run JavaScript in any tab from Emacs46709
+Node: browser-gt-request47023
+Node: Minimal example50903
+Node: browser-gt-js source blocks51924
+Node: Setup55311
+Node: Requirements55595
+Node: Emacs57629
+Node: yt-dlp command lines62906
+Node: Chrome extension64437
+Node: Firefox extension65316
+Node: What works the same in both extensions66349
+Node: What differs67152
+Node: Customising67763
+Node: Security68480
+Node: Sending content from the Web browser to Emacs69298
+Node: Querying and controlling tabs from Emacs70086
+Node: Evaluating JavaScript in tabs70862
+Node: Pausing the bridge without uninstalling72081
+Node: The WebSocket itself72499
+Node: Troubleshooting73573
+Node: License74905
+Node: Info manual75086
+Node: Adding a new action or modifying the protocol76121
 
 End Tag Table
 

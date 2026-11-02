@@ -1,38 +1,17 @@
-# Top-level Makefile for browser-gt.
+# Makefile for browser-gt.
 #
-# Drives both the elisp side (compile, lint) and delegates to the
-# extension's own Makefile for the WebExtension builds.
+# Package-specific settings only; every shared rule lives in
+# Makefile.common, which is an identical copy across the dmg packages.
+# Run `make help' for the target list, and see the header of
+# Makefile.common for what each variable below controls.
 #
-# Targets:
-#   make                — compile + extension (default)
-#   make lint           — package-lint every browser-gt*.el file
-#   make checkdoc       — checkdoc every browser-gt*.el file (errors on any warning)
-#   make check-declare  — verify declare-function file arguments (errors on any mismatch)
-#   make compile        — byte-compile every browser-gt*.el file (errors on warning)
-#   make extension      — rebuild Chrome + Firefox extension targets
-#                         (delegates to extension/Makefile's default target)
-#   make clean          — remove every *.elc file
-#   make check-worktree — abort unless $(CURDIR) is the worktree git
-#                         itself resolves to (catches a stale second
-#                         checkout that lints green but is not pushed)
-#   make check          — check-worktree + compile + lint + checkdoc
-#                         + check-declare + info
-#   make check-ci       — same as `make check' but under $(CI_EMACS)
-#                         (defaults to emacs-plus@30, matching the
-#                         GitHub Actions matrix; run before pushing)
-#   make info           — rebuild browser-gt.info and dir from README.org
-#                         (both are committed artifacts, not cleaned).
-#                         Also runs from `default', `check', and `all',
-#                         gated by README.org's mtime, so a stale info
-#                         cannot slip into a commit.
-#   make all            — check + extension
-#
-# Override the Emacs binary by passing EMACS=path/to/emacs.
+# Besides the elisp, this drives the WebExtension builds by delegating
+# to extension/Makefile.
 
-EMACS ?= emacs
+PACKAGE = browser-gt
 
-# Foundational files first so follow-on files can (require 'browser-gt) without
-# erroring when compiled in isolation.
+# Foundational file first so follow-on files can (require 'browser-gt)
+# without erroring when compiled in isolation.
 EL_FILES = browser-gt.el \
            browser-gt-www.el \
            browser-gt-chatgpt.el \
@@ -41,137 +20,33 @@ EL_FILES = browser-gt.el \
            browser-gt-babel.el \
            browser-gt-url-handler.el
 
-# Project-local ELPA so the user's personal package directory is not touched
-# and CI starts from a clean slate every run.
-ELPA_DIR = .elpa
-
-# Dependencies installed into the project-local ELPA before lint/compile.
-# `websocket' is the runtime dependency declared in browser-gt.el's
-# Package-Requires; `package-lint' is the lint tool itself.  Vertico is
-# a *soft* runtime dependency of browser-gt-tab-manager.el — the anchor-
-# restore path prefers vertico's internals when they are available and
-# degrades gracefully otherwise — so it is NOT installed here.  Byte-
-# compile stays warning-free via the `declare-function' / `defvar'
-# stubs at the top of that file.
+# `websocket' is the runtime dependency declared in Package-Requires;
+# `package-lint' is the lint tool itself.  Vertico is a *soft* runtime
+# dependency of browser-gt-tab-manager.el — the anchor-restore path
+# prefers vertico's internals when available and degrades gracefully
+# otherwise — so it is NOT installed here.  Byte-compile stays
+# warning-free via the `declare-function' / `defvar' stubs at the top
+# of that file.
 DEPS = websocket package-lint
 
-# Common Emacs invocation header: project-local package-user-dir, MELPA in
-# package-archives, package-initialize so installed packages are on load-path.
-EMACS_BATCH = $(EMACS) -Q --batch \
-  --eval "(setq package-user-dir (expand-file-name \"$(ELPA_DIR)\"))" \
-  --eval "(require 'package)" \
-  --eval "(add-to-list 'package-archives '(\"melpa\" . \"https://melpa.org/packages/\"))" \
-  --eval "(package-initialize)"
+# No suite yet; `make test' reports the skip until tests/*.el appears.
+TEST_DIR = tests
 
-.PHONY: default lint checkdoc check-declare compile clean check check-ci check-worktree extension info all
+INFO_SRC = README.org
 
-# Default target: byte-compile the elisp, rebuild the WebExtension
-# bundles, and regenerate the Info manual if README.org changed.
-# Info regeneration is dependency-gated -- if README.org has not been
-# touched since browser-gt.info was last built, this is a no-op.  Lint is
-# not included here so the common edit-then-`make' loop stays fast;
-# run `make check' or `make all' before committing.
-default: compile extension info
+# The WebExtension bundles are rebuilt alongside the elisp so a source
+# change and its build output stay in the same commit.
+DEFAULT_EXTRA = extension
 
-$(ELPA_DIR):
-	@mkdir -p $@
+HELP_EXTRA = "  make extension      rebuild the Chrome + Firefox bundles" \
+             "  make all            check + extension"
 
-$(ELPA_DIR)/.installed: | $(ELPA_DIR)
-	$(EMACS_BATCH) \
-	  --eval "(unless package-archive-contents (package-refresh-contents))" \
-	  $(foreach pkg,$(DEPS),--eval "(unless (package-installed-p '$(pkg)) (package-install '$(pkg)))")
-	@touch $@
+include Makefile.common
 
-lint: $(ELPA_DIR)/.installed
-	$(EMACS_BATCH) \
-	  --eval "(require 'package-lint)" \
-	  -f package-lint-batch-and-exit $(EL_FILES)
+# Delegate to the extension's own Makefile; its default target builds
+# both the Chrome (Manifest V3) and Firefox (Manifest V2) bundles.
+.PHONY: extension all
 
-# checkdoc runs in batch via `checkdoc-file', which writes warnings to
-# stderr (via `display-warning') but never exits non-zero on its own.
-# After each file, peek at the `*Warnings*' buffer to detect whether any
-# warning was emitted and exit 1 on the first one so CI fails on
-# regressions.  Stderr already carries the human-readable diagnostic;
-# no need to re-print it.  `-L .' lets each file `require' its siblings
-# during checkdoc's own load.
-checkdoc:
-	@$(EMACS_BATCH) \
-	  -L . \
-	  --eval "(require 'checkdoc)" \
-	  --eval "(let ((had-issue nil)) \
-	            (dolist (f command-line-args-left) \
-	              (with-current-buffer (get-buffer-create \"*Warnings*\") (erase-buffer)) \
-	              (checkdoc-file f) \
-	              (when (> (buffer-size (get-buffer-create \"*Warnings*\")) 0) \
-	                (setq had-issue t))) \
-	            (when had-issue (kill-emacs 1)))" \
-	  $(EL_FILES)
-
-# check-declare verifies the file argument of every `declare-function' form
-# by loading the named file and checking that the function is defined there.
-# `check-declare-file' returns a list of errors (or nil on success) and
-# writes a human-readable report to the `*Check Declarations Warnings*'
-# buffer.  We aggregate over all files and exit 1 on any finding so CI
-# fails on regressions.  `-L .' lets each file `require' its siblings.
-check-declare:
-	@$(EMACS_BATCH) \
-	  -L . \
-	  --eval "(require 'check-declare)" \
-	  --eval "(let ((had-issue nil)) \
-	            (dolist (f command-line-args-left) \
-	              (when (check-declare-file f) \
-	                (setq had-issue t))) \
-	            (when had-issue \
-	              (with-current-buffer (get-buffer-create check-declare-warning-buffer) \
-	                (princ (buffer-string))) \
-	              (kill-emacs 1)))" \
-	  $(EL_FILES)
-
-# Compile each file in a fresh subprocess so a definition leaked by one file
-# cannot mask a missing `require' in another.  Treats every byte-compile
-# warning as a hard error so CI catches them before commit.  `-L .' puts the
-# source tree on the load-path so files compile in order even though they
-# (require 'browser-gt) before browser-gt.elc exists.
-compile: $(ELPA_DIR)/.installed
-	@set -e; \
-	for f in $(EL_FILES); do \
-	  echo "==> compiling $$f"; \
-	  $(EMACS_BATCH) \
-	    --eval "(setq byte-compile-error-on-warn t)" \
-	    -L . \
-	    -f batch-byte-compile $$f; \
-	done
-
-clean:
-	rm -f *.elc
-
-# Info manual (multi-file ELPA convention): browser-gt.info and dir both
-# live at the package root and are committed.  `make clean' does NOT
-# touch them -- they are source-of-truth artifacts consumed by ELPA
-# activation.  Regenerate after editing README.org.
-INFO_FILE = browser-gt.info
-INFO_DIR  = dir
-
-info: $(INFO_FILE) $(INFO_DIR)
-
-# Stage README.org as browser-gt.org so Org's basename-derived output
-# filename matches `#+texinfo_filename'.  Without this, Org produces
-# README.texi -> browser-gt.info (from @setfilename) and then its
-# post-processing looks for README.info and fails.
-$(INFO_FILE): README.org
-	cp README.org browser-gt.org
-	$(EMACS) -Q --batch \
-	  --eval "(setq load-prefer-newer t)" \
-	  --eval "(require 'ox-texinfo)" \
-	  browser-gt.org \
-	  -f org-texinfo-export-to-info
-	rm -f browser-gt.org browser-gt.texi
-
-$(INFO_DIR): $(INFO_FILE)
-	install-info --info-file=$(INFO_FILE) --dir-file=$(INFO_DIR)
-
-# Delegate to the extension's own Makefile.  Its default target builds
-# both Chrome and Firefox bundles.
 extension:
 	$(MAKE) -C extension
 
@@ -183,6 +58,15 @@ extension:
 # what gets pushed.  That is exactly how the 2026-09-22 checkdoc
 # failure reached CI.  Comparing the physical path of `git
 # rev-parse --show-toplevel' against $(CURDIR) catches it outright.
+#
+# It is a prerequisite of `compile' rather than an entry of
+# CHECK_EXTRA: `compile' is the first thing `check' (and so
+# `check-ci') runs, while CHECK_EXTRA is appended last, after the
+# stale files have already been linted.  It lives here, not in
+# Makefile.common, because that file is a synced copy that must not
+# be edited in place.
+.PHONY: check-worktree
+compile: check-worktree
 check-worktree:
 	@top=`git rev-parse --show-toplevel 2>/dev/null`; \
 	if [ -z "$$top" ]; then \
@@ -196,25 +80,5 @@ check-worktree:
 	  echo "Sources here are NOT what git or CI sees; cd to the path above."; \
 	  exit 1; \
 	fi
-
-check: check-worktree compile lint checkdoc check-declare info
-
-# CI-mirror check: force the same Emacs version the GitHub Actions
-# matrix pins.  The default `make check' runs under whatever `emacs'
-# resolves to on the developer's PATH, which is typically the
-# latest release and has looser checkdoc / package-lint rules than
-# the version CI uses; that lets docstring drift slip through to a
-# CI failure.  Set CI_EMACS below to the absolute path of the
-# CI-matching binary and use `make check-ci' before pushing.
-CI_EMACS ?= /opt/homebrew/opt/emacs-plus@30/bin/emacs
-
-check-ci:
-	@if [ ! -x "$(CI_EMACS)" ]; then \
-	  echo "CI_EMACS not executable: $(CI_EMACS)"; \
-	  echo "Install with: brew install emacs-plus@30"; \
-	  echo "Or override: make check-ci CI_EMACS=/path/to/emacs"; \
-	  exit 1; \
-	fi
-	$(MAKE) EMACS=$(CI_EMACS) check
 
 all: check extension

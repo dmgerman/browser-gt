@@ -1,0 +1,272 @@
+# Makefile.common — build rules shared by the dmg Emacs packages.
+#
+# Every package carries an identical copy of this file.  The canonical
+# copy lives in ~/.emacs.d/modules/dmg/Makefile.common; edit that one
+# and run ./sync-makefile-common.sh to redistribute it.  Run the script
+# with --check to report drift instead of copying.  A copy inside a
+# package must never be edited in place: the next sync overwrites it.
+#
+# A package's Makefile sets the variables below, then ends with
+# `include Makefile.common'.  Assignments must precede the include,
+# because `check' expands its prerequisite list at parse time.
+#
+#   PACKAGE          package name; basename of the Info manual
+#   EL_FILES         sources in byte-compile order (required)
+#   DEPS             packages installed into the project-local ELPA
+#   UPGRADE_DEPS     subset of DEPS to install with
+#                    `package-install-upgrade-built-in' set, for
+#                    packages that ship bundled with Emacs (e.g. org)
+#   TEST_DIR         directory holding the ERT suite (default: test)
+#   TEST_FILES       files to load, in load order
+#                    (default: every .el under TEST_DIR)
+#   CUSTOM_TEST      non-empty when the package defines its own `test'
+#                    rule; the ERT rule below is then not defined
+#   INFO_SRC         Org source for the manual; empty disables `info'
+#   INFO_FILE        generated manual (default: $(PACKAGE).info)
+#   EXTRA_LOAD_PATH  extra -L arguments for every Emacs invocation
+#   CHECK_EXTRA      targets appended to `check'
+#   DEFAULT_EXTRA    targets appended to `default'
+#   EXTRA_CLEAN      additional files removed by `clean'
+#   HELP_EXTRA       lines printed after the standard help table
+#
+# Override the Emacs binary for a single run with EMACS=path/to/emacs.
+
+EMACS ?= emacs
+
+# Named per-version binaries mirroring the GitHub Actions matrix: the
+# Package-Requires floor and the latest release.
+EMACS_30 ?= /opt/homebrew/opt/emacs-plus@30/bin/emacs
+EMACS_31 ?= /opt/homebrew/opt/emacs-plus@31/bin/emacs
+CI_EMACS_LIST ?= $(EMACS_30) $(EMACS_31)
+
+TEST_DIR  ?= test
+TEST_FILES ?= $(wildcard $(TEST_DIR)/*.el)
+INFO_FILE ?= $(if $(strip $(INFO_SRC)),$(PACKAGE).info)
+INFO_DIR  ?= dir
+
+# Project-local ELPA so the user's personal package directory is not
+# touched and CI starts from a clean slate every run.
+ELPA_DIR ?= .elpa
+
+# Common Emacs invocation header: project-local package-user-dir, MELPA
+# and NonGNU ELPA in package-archives, package-initialize so installed
+# packages are on load-path.
+EMACS_BATCH = $(EMACS) -Q --batch \
+  --eval "(setq package-user-dir (expand-file-name \"$(ELPA_DIR)\"))" \
+  --eval "(require 'package)" \
+  --eval "(add-to-list 'package-archives '(\"melpa\" . \"https://melpa.org/packages/\"))" \
+  --eval "(add-to-list 'package-archives '(\"nongnu\" . \"https://elpa.nongnu.org/nongnu/\"))" \
+  --eval "(package-initialize)" \
+  $(EXTRA_LOAD_PATH)
+
+.DEFAULT_GOAL := default
+
+.PHONY: default lint checkdoc check-declare compile test clean check \
+        check-ci info help \
+        check-30 check-31 check-all \
+        lint-30 lint-31 lint-all \
+        checkdoc-30 checkdoc-31 checkdoc-all \
+        compile-30 compile-31 compile-all \
+        test-30 test-31 test-all
+
+# Byte-compile, and regenerate the manual when its source changed.
+# Lint is left out so the common edit-then-`make' loop stays fast; run
+# `make check' before committing.
+default: compile $(if $(strip $(INFO_SRC)),info) $(DEFAULT_EXTRA)
+
+$(ELPA_DIR):
+	@mkdir -p $@
+
+# UPGRADE_DEPS are installed first, with `package-install-upgrade-built-in'
+# set, so a version newer than the one bundled with Emacs is fetched.  The
+# remaining DEPS are installed only when absent.
+$(ELPA_DIR)/.installed: | $(ELPA_DIR)
+	$(EMACS_BATCH) \
+	  --eval "(unless package-archive-contents (package-refresh-contents))" \
+	  $(if $(strip $(UPGRADE_DEPS)),--eval "(setq package-install-upgrade-built-in t)") \
+	  $(foreach pkg,$(UPGRADE_DEPS),--eval "(package-install '$(pkg))") \
+	  $(foreach pkg,$(filter-out $(UPGRADE_DEPS),$(DEPS)),--eval "(unless (package-installed-p '$(pkg)) (package-install '$(pkg)))")
+	@touch $@
+
+lint: $(ELPA_DIR)/.installed
+	$(EMACS_BATCH) \
+	  --eval "(require 'package-lint)" \
+	  -f package-lint-batch-and-exit $(EL_FILES)
+
+# checkdoc runs in batch via `checkdoc-file', which writes warnings to
+# stderr (via `display-warning') but never exits non-zero on its own.
+# After each file, peek at the `*Warnings*' buffer to detect whether any
+# warning was emitted and exit 1 on the first one so CI fails on
+# regressions.  Stderr already carries the human-readable diagnostic;
+# no need to re-print it.  `-L .' lets each file `require' its siblings
+# during checkdoc's own load.
+checkdoc: $(ELPA_DIR)/.installed
+	@$(EMACS_BATCH) \
+	  -L . \
+	  --eval "(require 'checkdoc)" \
+	  --eval "(let ((had-issue nil)) \
+	            (dolist (f command-line-args-left) \
+	              (with-current-buffer (get-buffer-create \"*Warnings*\") (erase-buffer)) \
+	              (checkdoc-file f) \
+	              (when (> (buffer-size (get-buffer-create \"*Warnings*\")) 0) \
+	                (setq had-issue t))) \
+	            (when had-issue (kill-emacs 1)))" \
+	  $(EL_FILES)
+
+# check-declare verifies the file argument of every `declare-function'
+# form by loading the named file and checking that the function is
+# defined there.  `check-declare-file' returns a list of errors (or nil
+# on success) and writes a human-readable report to the `*Check
+# Declarations Warnings*' buffer.  We aggregate over all files and exit
+# 1 on any finding so CI fails on regressions.
+check-declare: $(ELPA_DIR)/.installed
+	@$(EMACS_BATCH) \
+	  -L . \
+	  --eval "(require 'check-declare)" \
+	  --eval "(let ((had-issue nil)) \
+	            (dolist (f command-line-args-left) \
+	              (when (check-declare-file f) \
+	                (setq had-issue t))) \
+	            (when had-issue \
+	              (with-current-buffer (get-buffer-create check-declare-warning-buffer) \
+	                (princ (buffer-string))) \
+	              (kill-emacs 1)))" \
+	  $(EL_FILES)
+
+# Compile each file in a fresh subprocess so a definition leaked by one
+# file cannot mask a missing `require' in another.  Treats every
+# byte-compile warning as a hard error so CI catches them before commit.
+# `-L .' puts the source tree on the load-path so files compile in order
+# even though they require siblings whose .elc does not exist yet.
+compile: $(ELPA_DIR)/.installed
+	@set -e; \
+	for f in $(EL_FILES); do \
+	  echo "==> compiling $$f"; \
+	  $(EMACS_BATCH) \
+	    --eval "(setq byte-compile-error-on-warn t)" \
+	    -L . \
+	    -f batch-byte-compile $$f; \
+	done
+
+ifeq ($(strip $(CUSTOM_TEST)),)
+# ERT: load each file in TEST_FILES, then run every test batch-mode.
+# An empty TEST_FILES is not an error — packages without a suite yet
+# report the skip and exit 0.  A package that needs a different runner
+# sets CUSTOM_TEST and defines `test' itself.
+test: $(ELPA_DIR)/.installed
+	@if [ -z "$(strip $(TEST_FILES))" ]; then \
+	  echo "no test files under $(TEST_DIR)/; skipping"; \
+	else \
+	  $(EMACS_BATCH) \
+	    -L . \
+	    -L $(TEST_DIR) \
+	    $(foreach f,$(TEST_FILES),-l $(f)) \
+	    -f ert-run-tests-batch-and-exit; \
+	fi
+endif
+
+clean:
+	rm -f *.elc $(TEST_DIR)/*.elc $(EXTRA_CLEAN)
+
+ifneq ($(strip $(INFO_SRC)),)
+# Info manual (multi-file ELPA convention): the .info and the `dir'
+# entry both live at the package root and are committed, because
+# package.el adds the installed directory to Info-directory-list on
+# activation.  `clean' deliberately leaves them alone.  Regeneration is
+# gated on INFO_SRC's mtime, so an untouched source is a no-op.
+info: $(INFO_FILE) $(INFO_DIR)
+
+# Stage INFO_SRC as $(PACKAGE).org so Org's basename-derived output
+# filename matches `#+texinfo_filename'.  Without this, Org produces
+# <src>.texi -> $(PACKAGE).info (from @setfilename) and then its
+# post-processing looks for <src>.info and fails.
+$(INFO_FILE): $(INFO_SRC)
+	cp $(INFO_SRC) $(PACKAGE).org
+	$(EMACS) -Q --batch \
+	  --eval "(setq load-prefer-newer t)" \
+	  --eval "(require 'ox-texinfo)" \
+	  $(PACKAGE).org \
+	  -f org-texinfo-export-to-info
+	@rm -f $(PACKAGE).org $(PACKAGE).texi
+
+$(INFO_DIR): $(INFO_FILE)
+	install-info --info-file=$(INFO_FILE) --dir-file=$(INFO_DIR)
+endif
+
+check: compile lint checkdoc check-declare test \
+       $(if $(strip $(INFO_SRC)),info) $(CHECK_EXTRA)
+
+# CI-mirror check.  EMACS_30 / EMACS_31 match the GitHub Actions matrix
+# in .github/workflows/package-lint.yml.  Both are mandatory: a skipped
+# version reports a pass that CI does not agree with, so `check-ci'
+# refuses to run until both are installed.  The default `make check'
+# runs under whatever `emacs' resolves to on PATH and cannot prove
+# multi-version compatibility.
+#
+# Every binary is verified before the first one runs, so a missing
+# install is reported up front rather than after a full pass.
+check-ci:
+	@missing=""; \
+	for e in $(CI_EMACS_LIST); do \
+	  [ -x "$$e" ] || missing="$$missing $$e"; \
+	done; \
+	if [ -n "$$missing" ]; then \
+	  echo "check-ci: required Emacs not executable:$$missing"; \
+	  echo "Install both:  brew install emacs-plus@30 emacs-plus@31"; \
+	  echo "Or override:   make check-ci CI_EMACS_LIST=\"/path/to/emacs ...\""; \
+	  exit 1; \
+	fi
+	@for e in $(CI_EMACS_LIST); do \
+	  echo "==> check-ci under $$e ($$($$e --version | head -1))"; \
+	  $(MAKE) EMACS=$$e check || exit 1; \
+	done
+
+# Per-version families.  Each delegates back into $(MAKE) with EMACS
+# pinned so the sub-invocation's EMACS_BATCH picks up that binary.
+# `check-30' / `check-31' are the common case; the finer-grained
+# variants help when tracking down a version-specific failure.
+define assert-emacs
+	@if [ ! -x "$($(1))" ]; then \
+	  echo "$(1) not executable: $($(1))"; \
+	  echo "Install with: brew install emacs-plus@$$(echo $(1) | sed -E 's/[^0-9]//g')"; \
+	  echo "Or override: make <target> $(1)=/path/to/emacs"; \
+	  exit 1; \
+	fi
+endef
+
+check-30:      ; $(call assert-emacs,EMACS_30) ; $(MAKE) EMACS=$(EMACS_30) check
+check-31:      ; $(call assert-emacs,EMACS_31) ; $(MAKE) EMACS=$(EMACS_31) check
+check-all:     check-30 check-31
+
+lint-30:       ; $(call assert-emacs,EMACS_30) ; $(MAKE) EMACS=$(EMACS_30) lint
+lint-31:       ; $(call assert-emacs,EMACS_31) ; $(MAKE) EMACS=$(EMACS_31) lint
+lint-all:      lint-30 lint-31
+
+checkdoc-30:   ; $(call assert-emacs,EMACS_30) ; $(MAKE) EMACS=$(EMACS_30) checkdoc
+checkdoc-31:   ; $(call assert-emacs,EMACS_31) ; $(MAKE) EMACS=$(EMACS_31) checkdoc
+checkdoc-all:  checkdoc-30 checkdoc-31
+
+compile-30:    ; $(call assert-emacs,EMACS_30) ; $(MAKE) EMACS=$(EMACS_30) compile
+compile-31:    ; $(call assert-emacs,EMACS_31) ; $(MAKE) EMACS=$(EMACS_31) compile
+compile-all:   compile-30 compile-31
+
+test-30:       ; $(call assert-emacs,EMACS_30) ; $(MAKE) EMACS=$(EMACS_30) test
+test-31:       ; $(call assert-emacs,EMACS_31) ; $(MAKE) EMACS=$(EMACS_31) test
+test-all:      test-30 test-31
+
+help:
+	@echo "$(PACKAGE) targets:"
+	@echo "  make                compile$(if $(strip $(INFO_SRC)), + info)$(if $(strip $(DEFAULT_EXTRA)), + $(DEFAULT_EXTRA)) (default)"
+	@echo "  make lint           package-lint every source"
+	@echo "  make checkdoc       checkdoc every source"
+	@echo "  make check-declare  verify declare-function file arguments"
+	@echo "  make compile        byte-compile, warnings fatal"
+	@echo "  make test           run the test suite under $(TEST_DIR)/"
+ifneq ($(strip $(INFO_SRC)),)
+	@echo "  make info           rebuild $(INFO_FILE) and $(INFO_DIR) from $(INFO_SRC)"
+endif
+	@echo "  make check          all of the above$(if $(strip $(CHECK_EXTRA)), + $(CHECK_EXTRA))"
+	@echo "  make check-ci       run check under every Emacs in CI_EMACS_LIST"
+	@echo "  make check-all      check-30 + check-31"
+	@echo "  make clean          remove *.elc"
+	@$(if $(strip $(HELP_EXTRA)),$(foreach l,$(HELP_EXTRA),echo "$(l)";))
