@@ -59,6 +59,7 @@
 ;; entry point shifts across org versions (ol.el, org.el, org-compat.el).
 ;; The runtime caller guards with `fboundp' regardless.
 (defvar org-capture-templates)
+(defvar url-http-response-status)       ; buffer-local in url-http.el
 (declare-function org-link-preview-region    "ol"  (&optional arg interactive? beg end) t)
 (declare-function org-display-inline-images  "org" (&optional include-linked refresh beg end) t)
 (declare-function org-capture                "org-capture" (&optional goto keys))
@@ -151,42 +152,77 @@ directory names or wildcard expansions."
 
 ;; ── Metadata fetching ─────────────────────────────────────────────────────────
 
+(defun browser-gt-youtube--http-error-detail (body)
+  "Return a one-line explanation of a failed HTTP request from BODY.
+Google APIs answer with JSON whose `error.message' says what went
+wrong (quota, bad key, ...); other endpoints answer with plain text
+such as \"Not Found\".  Falls back to the first line of BODY."
+  (let* ((json (ignore-errors
+                 (json-parse-string body :object-type 'hash-table
+                                         :array-type  'list)))
+         (err  (and (hash-table-p json) (gethash "error" json)))
+         (msg  (and (hash-table-p err) (gethash "message" err))))
+    (truncate-string-to-width
+     (if (stringp msg) msg (browser-gt-youtube--first-line body))
+     200)))
+
+(defun browser-gt-youtube--retrieve-json (api-url what &optional timeout)
+  "Fetch API-URL and return its body parsed as JSON.
+Objects become hash-tables with string keys, arrays become lists.
+WHAT names the service in error messages.  TIMEOUT is passed to
+`url-retrieve-synchronously'.  Signals an error carrying the HTTP
+status and the server's own explanation when the request does not
+succeed, rather than handing an error page to the JSON parser."
+  (let* ((coding-system-for-read 'binary)
+         (buf (url-retrieve-synchronously api-url t t timeout)))
+    (unless buf
+      (error "%s request got no response" what))
+    (unwind-protect
+        (with-current-buffer buf
+          (let ((status (bound-and-true-p url-http-response-status)))
+            (goto-char (point-min))
+            (re-search-forward "\n\n" nil 'move)
+            (let ((body (decode-coding-string
+                         (buffer-substring-no-properties (point) (point-max))
+                         'utf-8)))
+              (unless (and (integerp status) (<= 200 status 299))
+                (error "%s request failed (HTTP %s): %s"
+                       what (or status "?")
+                       (browser-gt-youtube--http-error-detail body)))
+              (condition-case err
+                  (json-parse-string body :object-type 'hash-table
+                                          :array-type  'list)
+                (error
+                 (error "%s returned invalid JSON (%s): %s"
+                        what (error-message-string err)
+                        (browser-gt-youtube--first-line body)))))))
+      (kill-buffer buf))))
+
 (defun browser-gt-youtube--fetch-oembed (url)
-  "Fetch YouTube oEmbed metadata for URL.  Return a hash-table or nil."
-  (let ((api-url (format "https://www.youtube.com/oembed?url=%s&format=json"
-                         (url-hexify-string url))))
-    (with-current-buffer (url-retrieve-synchronously api-url t t 5)
-      (goto-char (point-min))
-      (re-search-forward "\n\n" nil t)
-      (json-parse-buffer))))
+  "Fetch YouTube oEmbed metadata for URL.
+Returns a hash-table, or signals an error."
+  (browser-gt-youtube--retrieve-json
+   (format "https://www.youtube.com/oembed?url=%s&format=json"
+           (url-hexify-string url))
+   "YouTube oEmbed" 5))
 
 (defun browser-gt-youtube--fetch-api-info (url)
   "Fetch YouTube Data API v3 metadata for URL.
-Returns the first item hash-table, or signals an error."
+Returns the first item hash-table, or signals an error.  An empty
+`items' list (private, deleted, or region-blocked video) is an error
+too, not a silent nil."
   (let ((video-id (browser-gt-youtube--video-id url)))
     (unless video-id
       (error "Could not extract video ID from: %s" url))
     (unless browser-gt-youtube-api-key
-      (error "Chrome-server-youtube-api-key is not set"))
+      (error "Variable browser-gt-youtube-api-key is not set"))
     (let* ((api-url (format "https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails,statistics&id=%s&key=%s"
                             video-id browser-gt-youtube-api-key))
-           (coding-system-for-read 'binary)
-           (buf (url-retrieve-synchronously api-url t t)))
-      (unless buf (error "Failed to retrieve YouTube info"))
-      (unwind-protect
-          (with-current-buffer buf
-            (goto-char (point-min))
-            (re-search-forward "\n\n" nil 'move)
-            (let* ((raw  (buffer-substring-no-properties (point) (point-max)))
-                   (text (decode-coding-string raw 'utf-8)))
-              (with-temp-buffer
-                (insert text)
-                (goto-char (point-min))
-                (let ((json-object-type 'hash-table)
-                      (json-array-type  'list)
-                      (json-key-type    'string))
-                  (elt (gethash "items" (json-read)) 0)))))
-        (when (buffer-live-p buf) (kill-buffer buf))))))
+           (json    (browser-gt-youtube--retrieve-json api-url "YouTube Data API"))
+           (item    (car (gethash "items" json))))
+      (unless item
+        (error "YouTube Data API returned no video for id %s" video-id))
+      item)))
 
 ;; ── Duration / chapter helpers ────────────────────────────────────────────────
 
@@ -419,43 +455,60 @@ passed to yt-dlp as nil."
              (t (error "Unknown yt-dlp argument placeholder: %S" item))))
           template))
 
-(defun browser-gt-youtube--transcript-get-info (url)
-  "Run yt-dlp on URL for metadata and return the parsed JSON hash-table.
-The command line comes from `browser-gt-youtube-transcript-info-args'.
-Standard error goes to a file, not to the buffer being parsed: yt-dlp
-writes warnings there while the JSON goes to standard output, and
-`call-process' would otherwise merge the two.  See issue #5."
+(defun browser-gt-youtube--yt-dlp-message (stderr)
+  "Return the line of yt-dlp STDERR that best explains a failure.
+yt-dlp prints `WARNING:' lines for problems it recovers from and an
+`ERROR:' line for the one that stopped it, often after the warnings,
+so the first `ERROR:' line is preferred over the first line."
+  (or (seq-find (lambda (line) (string-prefix-p "ERROR:" line))
+                (split-string (or stderr "") "\n"))
+      (browser-gt-youtube--first-line stderr)))
+
+(defun browser-gt-youtube--call-yt-dlp (what template bindings)
+  "Run yt-dlp with TEMPLATE under BINDINGS; return its standard error.
+Standard output is inserted into the current buffer.  Standard error
+goes to a file, not to that buffer: yt-dlp writes warnings there, and
+`call-process' would otherwise merge them with the output (see issue
+#5).  WHAT describes the call in error messages.  Signals an error
+naming yt-dlp's own `ERROR:' line when it exits non-zero."
   (unless (executable-find browser-gt-youtube-transcript-yt-dlp-executable)
     (error "Yt-dlp not found (set browser-gt-youtube-transcript-yt-dlp-executable)"))
-  (let ((default-directory (expand-file-name "~/"))
-        (stderr-file       (make-temp-file "browser-gt-yt-dlp-stderr-")))
+  (let ((stderr-file (make-temp-file "browser-gt-yt-dlp-stderr-")))
     (unwind-protect
-        (with-temp-buffer
-          (let ((exit-code (apply #'call-process
-                                  browser-gt-youtube-transcript-yt-dlp-executable
-                                  nil (list t stderr-file) nil
-                                  (browser-gt-youtube--yt-dlp-args
-                                   browser-gt-youtube-transcript-info-args
-                                   `((url . ,url))))))
-            (unless (zerop exit-code)
-              (error "Yt-dlp metadata call failed (exit %d): %s"
-                     exit-code
-                     (browser-gt-youtube--first-line
-                      (browser-gt-youtube--file-contents stderr-file))))
-            (goto-char (point-min))
-            (let ((json-object-type 'hash-table)
-                  (json-array-type  'list)
-                  (json-key-type    'string))
-              ;; yt-dlp can exit 0 having produced no JSON at all; report
-              ;; its own message rather than the parse failure.
-              (condition-case err
-                  (json-read)
-                (error
-                 (error "Yt-dlp produced no JSON (%s); stderr: %s"
-                        (error-message-string err)
-                        (browser-gt-youtube--first-line
-                         (browser-gt-youtube--file-contents stderr-file))))))))
+        (let* ((exit-code (apply #'call-process
+                                 browser-gt-youtube-transcript-yt-dlp-executable
+                                 nil (list t stderr-file) nil
+                                 (browser-gt-youtube--yt-dlp-args
+                                  template bindings)))
+               (stderr    (browser-gt-youtube--file-contents stderr-file)))
+          (unless (eql exit-code 0)
+            (error "Yt-dlp %s failed (exit %s): %s"
+                   what exit-code
+                   (browser-gt-youtube--yt-dlp-message stderr)))
+          stderr)
       (delete-file stderr-file))))
+
+(defun browser-gt-youtube--transcript-get-info (url)
+  "Run yt-dlp on URL for metadata and return the parsed JSON hash-table.
+The command line comes from `browser-gt-youtube-transcript-info-args'."
+  (let ((default-directory (expand-file-name "~/")))
+    (with-temp-buffer
+      (let ((stderr (browser-gt-youtube--call-yt-dlp
+                     "metadata call"
+                     browser-gt-youtube-transcript-info-args
+                     `((url . ,url)))))
+        (goto-char (point-min))
+        (let ((json-object-type 'hash-table)
+              (json-array-type  'list)
+              (json-key-type    'string))
+          ;; yt-dlp can exit 0 having produced no JSON at all; report
+          ;; its own message rather than the parse failure.
+          (condition-case err
+              (json-read)
+            (error
+             (error "Yt-dlp produced no JSON (%s); stderr: %s"
+                    (error-message-string err)
+                    (browser-gt-youtube--yt-dlp-message stderr)))))))))
 
 (defun browser-gt-youtube--file-contents (path)
   "Return the contents of PATH as a string, or nil when it cannot be read."
@@ -472,34 +525,40 @@ writes warnings there while the JSON goes to standard output, and
 
 (defun browser-gt-youtube--transcript-effective-lang (info lang)
   "Return the subtitle language code actually available in INFO for LANG.
-Tries exact match first, then base language (e.g. \"en\" for \"en-US\").
-Returns nil if nothing is found."
-  (let ((manual (gethash "subtitles"          info))
-        (auto   (gethash "automatic_captions" info))
-        (base   (car (split-string lang "-"))))
-    (cond
-     ((or (and manual (gethash lang manual))
-          (and auto   (gethash lang auto)))  lang)
-     ((or (and manual (gethash base manual))
-          (and auto   (gethash base auto)))  base)
-     (t nil))))
+Tries LANG, then its base language (e.g. \"en\" for \"en-US\"), in this
+order of track kinds: manual subtitles, then the `<lang>-orig'
+automatic captions, then plain `<lang>' automatic captions.  On videos
+with dubbed audio tracks YouTube lists each spoken language as
+`<lang>-orig', and plain `<lang>' is a machine translation of some
+other track; YouTube rate-limits those translations (HTTP 429), so
+the original track is preferred.  Returns nil if nothing is found."
+  (let* ((manual     (gethash "subtitles"          info))
+         (auto       (gethash "automatic_captions" info))
+         (candidates (delete-dups (list lang (car (split-string lang "-"))))))
+    (seq-some (lambda (track)
+                (and (car track) (gethash (cdr track) (car track)) (cdr track)))
+              (append (mapcar (lambda (l) (cons manual l)) candidates)
+                      (mapcar (lambda (l) (cons auto (concat l "-orig"))) candidates)
+                      (mapcar (lambda (l) (cons auto l)) candidates)))))
 
 (defun browser-gt-youtube--transcript-download-vtt (url lang conv-dir video-id)
   "Download VTT subtitles for URL in LANG into CONV-DIR.
 VIDEO-ID is used as the output filename stem.  The command line comes
 from `browser-gt-youtube-transcript-vtt-args'.
-Returns the path of the downloaded VTT file, or nil if not found."
-  (let ((default-directory conv-dir))
-    (with-temp-buffer
-      (apply #'call-process
-             browser-gt-youtube-transcript-yt-dlp-executable
-             nil t nil
-             (browser-gt-youtube--yt-dlp-args
-              browser-gt-youtube-transcript-vtt-args
-              `((url    . ,url)
-                (lang   . ,lang)
-                (output . ,(expand-file-name video-id conv-dir)))))))
-  (car (file-expand-wildcards (format "%s/*.vtt" conv-dir))))
+Returns the path of the downloaded VTT file.  Signals an error with
+yt-dlp's own explanation (e.g. HTTP 429 from YouTube) when it fails,
+or when it exits cleanly without writing a VTT file."
+  (let* ((default-directory conv-dir)
+         (stderr (with-temp-buffer
+                   (browser-gt-youtube--call-yt-dlp
+                    "subtitle download"
+                    browser-gt-youtube-transcript-vtt-args
+                    `((url    . ,url)
+                      (lang   . ,lang)
+                      (output . ,(expand-file-name video-id conv-dir)))))))
+    (or (car (file-expand-wildcards (format "%s/*.vtt" conv-dir)))
+        (error "Yt-dlp wrote no %s subtitle file: %s"
+               lang (browser-gt-youtube--yt-dlp-message stderr)))))
 
 ;; ── VTT → Org conversion ─────────────────────────────────────────────────────
 
@@ -605,8 +664,10 @@ so it is safe to embed in the wildcard pattern."
   (car (seq-filter #'file-directory-p
                    (file-expand-wildcards (format "%s/*-%s-*" root video-id)))))
 
-(defun browser-gt-youtube--transcript-make-dir (payload info)
-  "Create and return the per-transcript directory path for PAYLOAD and INFO."
+(defun browser-gt-youtube--transcript-dir (payload info)
+  "Return the per-transcript directory path for PAYLOAD and INFO.
+Reuses an existing directory for the video when there is one.  Does
+not create anything; see `browser-gt-youtube--transcript-call-in-dir'."
   (let* ((url      (plist-get payload :url))
          (title    (or (plist-get payload :title)
                        (and info (gethash "title" info))
@@ -614,16 +675,32 @@ so it is safe to embed in the wildcard pattern."
          (video-id (or (browser-gt-youtube--video-id url)
                        (error "Refusing transcript: %s is not a recognized YouTube watch URL"
                               url)))
-         (root     (expand-file-name browser-gt-youtube-transcript-dir))
-         (conv-dir (or (browser-gt-youtube--transcript-find-existing-dir root video-id)
-                       (expand-file-name
-                        (format "%s-%s-%s"
-                                (format-time-string "%Y%m%d-%H%M%S")
-                                video-id
-                                (browser-gt-youtube--sanitize-title title))
-                        root))))
+         (root     (expand-file-name browser-gt-youtube-transcript-dir)))
+    (or (browser-gt-youtube--transcript-find-existing-dir root video-id)
+        (expand-file-name
+         (format "%s-%s-%s"
+                 (format-time-string "%Y%m%d-%H%M%S")
+                 video-id
+                 (browser-gt-youtube--sanitize-title title))
+         root))))
+
+(defun browser-gt-youtube--transcript-call-in-dir (payload info fn)
+  "Call FN with the transcript directory for PAYLOAD and INFO; return its value.
+The directory is created first when it does not exist.  If FN signals
+an error, a directory created here is deleted together with whatever
+FN left in it (a partial VTT, yt-dlp droppings) before the error is
+re-signalled, so a failed attempt leaves no empty directory behind
+for the next attempt to pick up.  A directory that already existed is
+kept: it holds an earlier transcript."
+  (let* ((conv-dir (browser-gt-youtube--transcript-dir payload info))
+         (created  (not (file-directory-p conv-dir))))
     (make-directory conv-dir t)
-    conv-dir))
+    (condition-case err
+        (funcall fn conv-dir)
+      (error
+       (when created
+         (delete-directory conv-dir t))
+       (signal (car err) (cdr err))))))
 
 (defun browser-gt-youtube--transcript-write-stub (payload info lang)
   "Write a stub org file noting no transcript was available.
@@ -638,28 +715,30 @@ code that turned out to have no captions."
              (manual     (and info (gethash "subtitles"          info)))
              (auto       (and info (gethash "automatic_captions" info)))
              (avail-man  (and manual (hash-table-keys manual)))
-             (avail-auto (and auto   (hash-table-keys auto)))
-             (conv-dir   (browser-gt-youtube--transcript-make-dir payload info))
-             (basename   (file-name-nondirectory conv-dir))
-             (file       (expand-file-name (concat basename ".org") conv-dir)))
+             (avail-auto (and auto   (hash-table-keys auto))))
         (message "No subs for lang=%s; manual=%S auto=%S"
                  lang avail-man avail-auto)
-        (with-temp-file file
-          (insert (format "#+title: %s\n" (browser-gt--sanitize-org-meta title)))
-          (insert (format "#+youtube_url: %s\n" (browser-gt--sanitize-org-meta url)))
-          (insert (format "#+created: %s\n\n" (format-time-string "%Y-%m-%d %H:%M:%S")))
-          (insert (browser-gt--make-link url "Open in YouTube"))
-          (insert "\n\n")
-          (insert (format "No transcript available (language: %s).\n"
-                          (browser-gt--sanitize-org-meta lang)))
-          (when avail-man
-            (insert (format "Manual subtitles available: %s\n"
-                            (browser-gt--sanitize-org-meta
-                             (string-join avail-man ", ")))))
-          (when avail-auto
-            (insert (format "Auto captions available: %s\n"
-                            (browser-gt--sanitize-org-meta
-                             (string-join avail-auto ", ")))))))
+        (browser-gt-youtube--transcript-call-in-dir
+         payload info
+         (lambda (conv-dir)
+           (with-temp-file (expand-file-name
+                            (concat (file-name-nondirectory conv-dir) ".org")
+                            conv-dir)
+             (insert (format "#+title: %s\n" (browser-gt--sanitize-org-meta title)))
+             (insert (format "#+youtube_url: %s\n" (browser-gt--sanitize-org-meta url)))
+             (insert (format "#+created: %s\n\n" (format-time-string "%Y-%m-%d %H:%M:%S")))
+             (insert (browser-gt--make-link url "Open in YouTube"))
+             (insert "\n\n")
+             (insert (format "No transcript available (language: %s).\n"
+                             (browser-gt--sanitize-org-meta lang)))
+             (when avail-man
+               (insert (format "Manual subtitles available: %s\n"
+                               (browser-gt--sanitize-org-meta
+                                (string-join avail-man ", ")))))
+             (when avail-auto
+               (insert (format "Auto captions available: %s\n"
+                               (browser-gt--sanitize-org-meta
+                                (string-join avail-auto ", ")))))))))
     (error
      (browser-gt--warn "could not write stub: %s"
                           (error-message-string err)))))
@@ -679,48 +758,50 @@ If no transcript is available, writes a stub org file and logs to *Messages*."
               (message "No transcript for %s (lang: %s)" url lang))
           (let* ((video-id (or (browser-gt-youtube--video-id url) "unknown"))
                  (title    (or (and info (gethash "title" info)) title))
-                 (conv-dir (browser-gt-youtube--transcript-make-dir payload info))
-                 (basename (file-name-nondirectory conv-dir))
-                 (org-file (expand-file-name (concat basename ".org") conv-dir))
-                 (vtt-path (browser-gt-youtube--transcript-download-vtt
-                            url eff-lang conv-dir video-id)))
-            (unless vtt-path
-              (error "Browser-gt-youtube: VTT file not found after download"))
-            (let* ((vtt-dest    (expand-file-name (concat basename ".vtt") conv-dir))
-                   (vtt-content (with-temp-buffer
-                                  (insert-file-contents vtt-path)
-                                  (buffer-string)))
-                   (api-info   (condition-case e
-                                   (browser-gt-youtube--fetch-api-info url)
-                                 (error
-                                  (browser-gt--warn "API fetch failed (continuing without): %s"
-                                                       (error-message-string e))
-                                  nil)))
-                   (oembed     (condition-case e
-                                   (browser-gt-youtube--fetch-oembed url)
-                                 (error
-                                  (browser-gt--warn "oEmbed fetch failed (continuing without): %s"
-                                                       (error-message-string e))
-                                  nil)))
-                   (title      (browser-gt-youtube--resolve-title title oembed api-info))
-                   (entry      (replace-regexp-in-string
-                                "^\\* TODO " "* "
-                                (browser-gt-youtube--build-entry
-                                 url title "" oembed api-info video-id))))
-              (unless (string= vtt-path vtt-dest)
-                (rename-file vtt-path vtt-dest t))
-              (with-temp-file org-file
-                (insert (format "#+title: %s\n"
-                                (browser-gt--sanitize-org-meta title)))
-                (insert (format "#+youtube_url: %s\n"
-                                (browser-gt--sanitize-org-meta url)))
-                (insert (format "#+youtube_lang: %s\n"
-                                (browser-gt--sanitize-org-meta eff-lang)))
-                (insert (format "#+created: %s\n\n" (format-time-string "%Y-%m-%d %H:%M:%S")))
-                (insert entry)
-                (insert "\n** Transcript\n\n")
-                (insert (browser-gt-youtube--transcript-vtt-to-org vtt-content url))
-                (insert "\n")))
+                 (org-file
+                  (browser-gt-youtube--transcript-call-in-dir
+                   payload info
+                   (lambda (conv-dir)
+                     (let* ((basename    (file-name-nondirectory conv-dir))
+                            (org-file    (expand-file-name (concat basename ".org") conv-dir))
+                            (vtt-path    (browser-gt-youtube--transcript-download-vtt
+                                          url eff-lang conv-dir video-id))
+                            (vtt-dest    (expand-file-name (concat basename ".vtt") conv-dir))
+                            (vtt-content (with-temp-buffer
+                                           (insert-file-contents vtt-path)
+                                           (buffer-string)))
+                            (api-info    (condition-case e
+                                             (browser-gt-youtube--fetch-api-info url)
+                                           (error
+                                            (browser-gt--warn "API fetch failed (continuing without): %s"
+                                                              (error-message-string e))
+                                            nil)))
+                            (oembed      (condition-case e
+                                             (browser-gt-youtube--fetch-oembed url)
+                                           (error
+                                            (browser-gt--warn "oEmbed fetch failed (continuing without): %s"
+                                                              (error-message-string e))
+                                            nil)))
+                            (title       (browser-gt-youtube--resolve-title title oembed api-info))
+                            (entry       (replace-regexp-in-string
+                                          "^\\* TODO " "* "
+                                          (browser-gt-youtube--build-entry
+                                           url title "" oembed api-info video-id))))
+                       (unless (string= vtt-path vtt-dest)
+                         (rename-file vtt-path vtt-dest t))
+                       (with-temp-file org-file
+                         (insert (format "#+title: %s\n"
+                                         (browser-gt--sanitize-org-meta title)))
+                         (insert (format "#+youtube_url: %s\n"
+                                         (browser-gt--sanitize-org-meta url)))
+                         (insert (format "#+youtube_lang: %s\n"
+                                         (browser-gt--sanitize-org-meta eff-lang)))
+                         (insert (format "#+created: %s\n\n" (format-time-string "%Y-%m-%d %H:%M:%S")))
+                         (insert entry)
+                         (insert "\n** Transcript\n\n")
+                         (insert (browser-gt-youtube--transcript-vtt-to-org vtt-content url))
+                         (insert "\n"))
+                       org-file)))))
             (browser-gt--maybe-raise payload)
             (kill-new org-file)
             (message "Transcript saved to %s (path copied to clipboard)" org-file))))
